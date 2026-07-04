@@ -22,7 +22,7 @@ Made for the “let me jot this down real quick” moments - without Electron bl
 - 🔔 Optional **system tray** support
 - 📥 **Import / Export** tasks as JSON
 - 🪨 **Local-first**: saves config + tasks as JSON in your home folder
-
+<!-- 
 ---
 
 ## 🪨 Obsidian integration (optional)
@@ -31,7 +31,7 @@ Point Le'Sticky Notes to a Markdown note in your vault, and it will sync tasks i
 Open and completed tasks are kept in separate sections, and tasks are updated by internal IDs to avoid duplicates.
 
 No cloud. No accounts. Your vault stays yours.
-
+-->
 ---
 
 ## 🚀 How to run
@@ -113,8 +113,8 @@ What happens next:
 
 If you want a ready-to-use productivity vault template, I maintain:
 
-👉 ObsidianUltimate: <PUT_YOUR_REPO_LINK_HERE>
+👉 ObsidianUltimate: <a href="https://github.com/Olexify/ObsidianUltimate">Github Repo</a>
 
-Le'Sticky Notes is not locked to ObsidianUltimate - it just pairs nicely with it.
+Le'Sticky Notes is not locked to ObsidianUltimate - it just pairs nicely with it as notes backup.
 
 > ⚠️ ObsidianUltimate note: don’t rename `Diary` or `Utilities` (some automations depend on them).
