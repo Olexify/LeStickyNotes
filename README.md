@@ -122,11 +122,14 @@ Le'Sticky Notes is not locked to ObsidianUltimate - it just pairs nicely with it
 
 ---
 
-## 🚀 Start with Windows
+
+## 🪟 Windows StartUP 🚀
 
 If you want Le'Sticky Notes to open automatically when Windows starts, you can add it to the **Startup** folder.
 
 This is useful if you want your sticky tasks ready immediately after login.
+
+<img width="1405" height="798" alt="Opening the Windows Startup folder with shell:startup and placing the LeStickyNotes shortcut there" src="https://github.com/user-attachments/assets/02662195-4e9d-4ac5-8e61-f75173ac270a" />
 
 ### Method 1: Add shortcut to Startup folder
 
@@ -154,36 +157,11 @@ You can do this by:
 - Choosing **Create shortcut**
 - Moving that shortcut into the Startup folder
 
-Or:
-
-- Right-click the `.exe`
-- Choose **Copy**
-- Open the Startup folder
-- Right-click → **Paste shortcut**
-
 Once the shortcut is inside that folder, Windows will launch Le'Sticky Notes automatically on login.
-
-### Example
-
-Your Startup folder may look like this after setup:
-
-```text
-AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
-```
-
-with a shortcut such as:
-
-```text
-LeStickyNotes
-```
-
-inside it.
-
-> Tip: you can also assign a custom icon to the shortcut if you want it to look cleaner.
 
 ### ⚠️ Important note
 
-If you use Startup launching, make sure the shortcut points to the correct `.exe` location.
+Make sure the shortcut points to the correct `.exe` location.
 
 If you later move the app to another folder, the startup shortcut may stop working until you recreate it.
 
@@ -194,7 +172,6 @@ If you want Le'Sticky Notes to start more quietly, you can combine Windows start
 - **Show in tray**
 - **Start hidden to tray**
 
-That way the app launches with Windows without immediately popping a full window into your face.
+That way the app launches with Windows without immediately opening a full window.
 
 ---
-
