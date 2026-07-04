@@ -129,7 +129,7 @@ If you want Le'Sticky Notes to open automatically when Windows starts, you can a
 
 This is useful if you want your sticky tasks ready immediately after login.
 
-<img width="1405" height="798" alt="Opening the Windows Startup folder with shell:startup and placing the LeStickyNotes shortcut there" src="https://github.com/user-attachments/assets/02662195-4e9d-4ac5-8e61-f75173ac270a" />
+<img width="1364" height="846" alt="Opening the Windows Startup folder with shell:startup and placing the LeStickyNotes shortcut there" src="https://github.com/user-attachments/assets/d1d6ffc5-74ab-4c84-89aa-131d32b232cb" />
 
 ### Method 1: Add shortcut to Startup folder
 
