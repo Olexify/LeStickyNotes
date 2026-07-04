@@ -2,7 +2,7 @@
 
 A **lightweight, standalone sticky notes / task app for Windows** with optional **Obsidian** integration.
 
-Made for the “let me jot this down real quick” moments — without Electron bloat, cloud accounts, or productivity theater.
+Made for the “let me jot this down real quick” moments - without Electron bloat, cloud accounts, or productivity theater. On image you can see the Obsidian live integration as backup of solved tasks.
 
 <img width="2029" height="1384" alt="Le'Sticky Notes screenshot" src="https://github.com/user-attachments/assets/29d6684b-e5ab-4b4c-b995-53ed7a7d9b3c" />
 
@@ -37,7 +37,7 @@ No cloud. No accounts. Your vault stays yours.
 ## 🚀 How to run
 
 ### Option 1: Run the included `.exe`
-Download and launch the executable — no install needed.
+Download and launch the executable - no install needed.
 
 ### Option 2: Run from source
 ```bash
@@ -58,7 +58,7 @@ To build the `.exe`, run the included batch script:
 build.bat
 ```
 
-(If your script has a different name — replace it here.)
+(If your script has a different name - replace it here.)
 
 ---
 
@@ -89,10 +89,10 @@ build.bat
 
 ## 🪨 Obsidian integration (optional)
 
-Le'Sticky Notes works **fully standalone** — Obsidian is not required.
+Le'Sticky Notes works **fully standalone** - Obsidian is not required.
 
 If you *do* use Obsidian, just set a target Markdown note and the app will sync tasks into it.
-Works with **any Obsidian vault** (yours, mine, portable vault on a USB stick — doesn’t matter).
+Works with **any Obsidian vault** (yours, mine, portable vault on a USB stick - doesn’t matter).
 
 ### How to hook it up
 
@@ -115,6 +115,6 @@ If you want a ready-to-use productivity vault template, I maintain:
 
 👉 ObsidianUltimate: <PUT_YOUR_REPO_LINK_HERE>
 
-Le'Sticky Notes is not locked to ObsidianUltimate — it just pairs nicely with it.
+Le'Sticky Notes is not locked to ObsidianUltimate - it just pairs nicely with it.
 
 > ⚠️ ObsidianUltimate note: don’t rename `Diary` or `Utilities` (some automations depend on them).
