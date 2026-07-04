@@ -355,6 +355,16 @@ class App:
         self.status_lbl = tk.Label(self.main,textvariable=self.status_var,bg=self.T["header_bg"],fg=self.T["text"],font=("Segoe UI Variable",8),anchor="w",padx=8,pady=4)
         self.status_lbl.pack(fill="x")
         self._render_tasks()
+        self.root.after(50, lambda: self._bind_ctrl_wheel_recursive(self.main))
+
+    def _bind_ctrl_wheel_recursive(self, widget):
+        for seq in ("<Control-MouseWheel>", "<Control-Button-4>", "<Control-Button-5>"):
+            try:
+                widget.bind(seq, self._ctrl_scroll, add="+")
+            except Exception:
+                pass
+        for child in widget.winfo_children():
+            self._bind_ctrl_wheel_recursive(child)
 
     def _retheme_main_only(self):
         self.T = THEMES[self.cfg["theme"]]
