@@ -4,7 +4,7 @@ A **lightweight, standalone sticky notes / task app for Windows** with optional 
 
 Made for the “let me jot this down real quick” moments - without Electron bloat, cloud accounts, or productivity theater. On image you can see the Obsidian live integration as backup of solved tasks.
 
-<img width="2029" height="1384" alt="Le'Sticky Notes screenshot" src="https://github.com/user-attachments/assets/92207e3a-9ec9-45ae-8e27-a5a00f882887" />
+<img width="1835" height="1440" alt="Le'Sticky Notes screenshot" src="https://github.com/user-attachments/assets/92207e3a-9ec9-45ae-8e27-a5a00f882887" />
 
 ---
 
