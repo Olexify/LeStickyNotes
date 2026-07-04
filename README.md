@@ -118,3 +118,83 @@ If you want a ready-to-use productivity vault template, I maintain:
 Le'Sticky Notes is not locked to ObsidianUltimate - it just pairs nicely with it as notes backup.
 
 > ⚠️ ObsidianUltimate note: don’t rename `Diary` or `Utilities` (some automations depend on them).
+
+
+---
+
+## 🚀 Start with Windows
+
+If you want Le'Sticky Notes to open automatically when Windows starts, you can add it to the **Startup** folder.
+
+This is useful if you want your sticky tasks ready immediately after login.
+
+### Method 1: Add shortcut to Startup folder
+
+1. Press:
+
+```text
+Win + R
+```
+
+2. Type:
+
+```text
+shell:startup
+```
+
+3. Press **OK**
+
+This opens the Windows Startup folder.
+
+4. Create a shortcut to `LeStickyNotes.exe`
+
+You can do this by:
+
+- Right-clicking the `.exe`
+- Choosing **Create shortcut**
+- Moving that shortcut into the Startup folder
+
+Or:
+
+- Right-click the `.exe`
+- Choose **Copy**
+- Open the Startup folder
+- Right-click → **Paste shortcut**
+
+Once the shortcut is inside that folder, Windows will launch Le'Sticky Notes automatically on login.
+
+### Example
+
+Your Startup folder may look like this after setup:
+
+```text
+AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+```
+
+with a shortcut such as:
+
+```text
+LeStickyNotes
+```
+
+inside it.
+
+> Tip: you can also assign a custom icon to the shortcut if you want it to look cleaner.
+
+### ⚠️ Important note
+
+If you use Startup launching, make sure the shortcut points to the correct `.exe` location.
+
+If you later move the app to another folder, the startup shortcut may stop working until you recreate it.
+
+### Optional in-app tray behavior
+
+If you want Le'Sticky Notes to start more quietly, you can combine Windows startup with:
+
+- **Show in tray**
+- **Start hidden to tray**
+
+That way the app launches with Windows without immediately popping a full window into your face.
+
+---
+
