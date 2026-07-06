@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "show_in_taskbar": False,
     "run_at_startup": False,
     "ui_scale": 1.0,
+    "ui_font": "Segoe UI Variable",
     "settings_x": None, "settings_y": None,
     "settings_w": 520, "settings_h": 600,
 }
@@ -44,7 +45,7 @@ THEMES = {
     "peach": {"bg":"#fff7ed","header_bg":"#fed7aa","text":"#4a2b18","muted":"#916a4e","entry_bg":"#fffaf5","entry_fg":"#4a2b18","btn_bg":"#fdba74","btn_fg":"#4a2b18","btn_hover":"#fb923c","check_done":"#16a34a","separator":"#fed7aa","item_bg":"#fffaf5","item_hover":"#ffedd5","tab_bg":"#ffedd5","archive":"#c2410c","close_hover":"#dc2626","low":"#2563eb","medium":"#d97706","high":"#dc2626"},
     "sky": {"bg":"#f0f9ff","header_bg":"#bae6fd","text":"#0f2f4a","muted":"#5f7f9a","entry_bg":"#f8fcff","entry_fg":"#0f2f4a","btn_bg":"#7dd3fc","btn_fg":"#0f2f4a","btn_hover":"#38bdf8","check_done":"#0284c7","separator":"#bae6fd","item_bg":"#f8fcff","item_hover":"#e0f2fe","tab_bg":"#e0f2fe","archive":"#0369a1","close_hover":"#dc2626","low":"#2563eb","medium":"#d97706","high":"#dc2626"},
     "slate": {"bg":"#f8fafc","header_bg":"#cbd5e1","text":"#1e293b","muted":"#64748b","entry_bg":"#ffffff","entry_fg":"#1e293b","btn_bg":"#cbd5e1","btn_fg":"#1e293b","btn_hover":"#94a3b8","check_done":"#22c55e","separator":"#cbd5e1","item_bg":"#ffffff","item_hover":"#f1f5f9","tab_bg":"#e2e8f0","archive":"#334155","close_hover":"#dc2626","low":"#2563eb","medium":"#d97706","high":"#dc2626"},
-    "fire": {"bg":"#fff5f3","header_bg":"#fca5a5","text":"#4a1c14","muted":"#946057","entry_bg":"#fffaf9","entry_fg":"#4a1c14","btn_bg":"#fb7185","btn_fg":"#4a1c14","btn_hover":"#ef4444","check_done":"#16a34a","separator":"#fecaca","item_bg":"#fffaf9","item_hover":"#ffe4e6","tab_bg":"#ffe4e6","archive":"#b91c1c","close_hover":"#dc2626","low":"#2563eb","medium":"#f59e0b","high":"#dc2626"},
+    "coral": {"bg":"#fff5f3","header_bg":"#fca5a5","text":"#4a1c14","muted":"#946057","entry_bg":"#fffaf9","entry_fg":"#4a1c14","btn_bg":"#fb7185","btn_fg":"#4a1c14","btn_hover":"#ef4444","check_done":"#16a34a","separator":"#fecaca","item_bg":"#fffaf9","item_hover":"#ffe4e6","tab_bg":"#ffe4e6","archive":"#b91c1c","close_hover":"#dc2626","low":"#2563eb","medium":"#f59e0b","high":"#dc2626"},
     "sand": {"bg":"#fff8ed","header_bg":"#f5d7a1","text":"#4a3720","muted":"#8b7355","entry_bg":"#fffdf8","entry_fg":"#4a3720","btn_bg":"#e9c46a","btn_fg":"#4a3720","btn_hover":"#ddb85a","check_done":"#65a30d","separator":"#efdfbf","item_bg":"#fffdf8","item_hover":"#fbf1dc","tab_bg":"#f7ebd0","archive":"#b7791f","close_hover":"#dc2626","low":"#2563eb","medium":"#d97706","high":"#dc2626"},
     "island": {"bg":"#eefcf7","header_bg":"#9fe3cf","text":"#133a33","muted":"#5d7f77","entry_bg":"#f8fffc","entry_fg":"#133a33","btn_bg":"#67d4b7","btn_fg":"#133a33","btn_hover":"#34caa0","check_done":"#0f9f6e","separator":"#bfeee0","item_bg":"#f8fffc","item_hover":"#def8ef","tab_bg":"#d8f4eb","archive":"#0f766e","close_hover":"#dc2626","low":"#2563eb","medium":"#d97706","high":"#dc2626"},
     "crimson": {"bg":"#1a0f12","header_bg":"#3a161d","text":"#f7d7db","muted":"#b48a91","entry_bg":"#221317","entry_fg":"#f7d7db","btn_bg":"#5b1f2b","btn_fg":"#f7d7db","btn_hover":"#7a2434","check_done":"#22c55e","separator":"#3a161d","item_bg":"#211417","item_hover":"#2a181d","tab_bg":"#2a181d","archive":"#f87171","close_hover":"#ef4444","low":"#60a5fa","medium":"#f59e0b","high":"#ef4444"},
@@ -56,6 +57,11 @@ THEMES = {
     "eclipse": {"bg":"#0a0a0a","header_bg":"#1a1a1a","text":"#f2f2f2","muted":"#8a8a8a","entry_bg":"#111111","entry_fg":"#f2f2f2","btn_bg":"#2a2a2a","btn_fg":"#f2f2f2","btn_hover":"#3a3a3a","check_done":"#9ca3af","separator":"#1a1a1a","item_bg":"#111111","item_hover":"#181818","tab_bg":"#181818","archive":"#d4d4d8","close_hover":"#ef4444","low":"#60a5fa","medium":"#f59e0b","high":"#ef4444"}
 }
 PRIORITIES = ["none","low","medium","high"]
+UI_FONTS = [
+    "Segoe UI Variable", "Segoe UI", "Calibri", "Helvetica", "Arial",
+    "Trebuchet MS", "Verdana", "Tahoma", "Georgia", "Palatino Linotype",
+    "Courier New", "Consolas", "Lucida Console", "Comic Sans MS",
+]
 OPEN_SEP = "<!-- OPEN_TASKS -->"
 CLOSED_SEP = "<!-- CLOSED_TASKS -->"
 TRASH_HOURS = 24
@@ -317,7 +323,9 @@ class App:
 
     def _build_ui(self):
         self._apply_scrollbar_style()
-        for w in self.root.winfo_children(): w.destroy()
+        for w in self.root.winfo_children():
+            if isinstance(w, tk.Toplevel): continue
+            w.destroy()
         self._pin_btn = None
         self.root.configure(bg=self.T["separator"])
         outer = tk.Frame(self.root, bg=self.T["separator"]); outer.pack(fill="both",expand=True)
@@ -337,7 +345,7 @@ class App:
         self.entry_area = tk.Frame(self.top_input_host, bg=self.T["bg"], pady=6, padx=6)
         self.entry_area.pack(fill="x")
         self.entry_var = tk.StringVar()
-        self.entry = tk.Entry(self.entry_area,textvariable=self.entry_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=("Segoe UI Variable",11),bd=0,highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
+        self.entry = tk.Entry(self.entry_area,textvariable=self.entry_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),11),bd=0,highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
         self.entry.pack(side="left",fill="x",expand=True,ipady=6,padx=(0,4))
         self.entry.bind("<Return>", self._add_task)
         self.entry.bind("<Control-MouseWheel>", self._ctrl_scroll)
@@ -345,10 +353,10 @@ class App:
         self.add_btn.pack(side="right")
 
         self.search_area = tk.Frame(self.top_input_host, bg=self.T["bg"], pady=6, padx=6)
-        self.search_entry = tk.Entry(self.search_area,textvariable=self.search_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=("Segoe UI Variable",11),bd=0,highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
+        self.search_entry = tk.Entry(self.search_area,textvariable=self.search_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),11),bd=0,highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
         self.search_entry.pack(side="left",fill="x",expand=True,ipady=6,padx=(0,4))
         self.search_entry.bind("<KeyRelease>", lambda e: self._render_tasks())
-        tk.Button(self.search_area,text="Clear",command=lambda:(self.search_var.set(""), self._render_tasks()),bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=("Segoe UI Variable",10),padx=10,pady=6,cursor="hand2",activebackground=self.T["btn_hover"]).pack(side="right")
+        tk.Button(self.search_area,text="Clear",command=lambda:(self.search_var.set(""), self._render_tasks()),bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),10),padx=10,pady=6,cursor="hand2",activebackground=self.T["btn_hover"]).pack(side="right")
 
         lf = tk.Frame(self.main,bg=self.T["bg"]); lf.pack(fill="both",expand=True,padx=6,pady=(0,6))
         self.canvas = tk.Canvas(lf,bg=self.T["bg"],bd=0,highlightthickness=0)
@@ -372,7 +380,7 @@ class App:
 
         tk.Frame(self.main,bg=self.T["separator"],height=1).pack(fill="x")
         self.status_var = tk.StringVar()
-        self.status_lbl = tk.Label(self.main,textvariable=self.status_var,bg=self.T["header_bg"],fg=self.T["text"],font=("Segoe UI Variable",8),anchor="w",padx=8,pady=4)
+        self.status_lbl = tk.Label(self.main,textvariable=self.status_var,bg=self.T["header_bg"],fg=self.T["text"],font=(self.cfg.get("ui_font","Segoe UI Variable"),8),anchor="w",padx=8,pady=4)
         self.status_lbl.pack(fill="x")
         self._render_tasks()
         self.root.after(50, lambda: self._bind_ctrl_wheel_recursive(self.main))
@@ -395,6 +403,7 @@ class App:
         self._refresh_tabs()
         self._render_tasks()
         self._restyle_settings_window()
+        self.root.after(30, self._keep_settings_alive)
 
     def _restyle_settings_window(self):
         if not (self._settings_win and self._settings_win.winfo_exists()):
@@ -419,7 +428,7 @@ class App:
 
     def _soft_pin_color(self):
         darkish = {"dark", "crimson", "forest", "emerald", "midnight", "space", "violet-night", "eclipse"}
-        visible_light = {"ocean", "rose", "lavender", "peach", "sky", "slate", "fire", "sand", "island", "yellow"}
+        visible_light = {"ocean", "rose", "lavender", "peach", "sky", "slate", "coral", "sand", "island", "yellow"}
         name = self.cfg.get("theme")
         if name in darkish:
             return self.T["btn_hover"]
@@ -443,7 +452,7 @@ class App:
             lbl.bind(ev,cb)
         bf = tk.Frame(hdr,bg=T["header_bg"]); bf.pack(side="right",padx=4)
         def hbtn(text, cmd, red=False):
-            b = tk.Button(bf,text=text,command=cmd,bg=T["header_bg"],fg=T["text"],relief="flat",font=("Segoe UI Variable",10),padx=9,pady=5,cursor="hand2",bd=0,activeforeground=T["btn_fg"],activebackground=T["close_hover"] if red else T["btn_hover"])
+            b = tk.Button(bf,text=text,command=cmd,bg=T["header_bg"],fg=T["text"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),10),padx=9,pady=5,cursor="hand2",bd=0,activeforeground=T["btn_fg"],activebackground=T["close_hover"] if red else T["btn_hover"])
             b.pack(side="right")
             def leave(_e): b.configure(bg=self._soft_pin_color() if (b is self._pin_btn and self.cfg.get("always_on_top")) else T["header_bg"])
             b.bind("<Enter>", lambda e: b.configure(bg=T["close_hover"] if red else T["btn_hover"]))
@@ -552,7 +561,7 @@ class App:
             pool = self._search_pool()
         if not pool:
             msg = "No tasks yet.\nAdd one above ↑" if self.current_tab=="active" else ("Archive is empty." if self.current_tab=="archive" else ("Bin is empty." if self.current_tab=="trash" else "No search results."))
-            tk.Label(self.task_frame,text=msg,bg=T["bg"],fg=T["muted"],font=("Segoe UI Variable",10),justify="center",pady=28).pack(fill="x")
+            tk.Label(self.task_frame,text=msg,bg=T["bg"],fg=T["muted"],font=(self.cfg.get("ui_font","Segoe UI Variable"),10),justify="center",pady=28).pack(fill="x")
         else:
             for task in pool:
                 self._task_row(task, archived=(self.current_tab=="archive"), trashed=(self.current_tab=="trash"), searching=(self.current_tab=="search"))
@@ -590,7 +599,7 @@ class App:
 
         drag_lbl = None
         if not archived and not trashed and not searching:
-            drag_lbl = tk.Label(row,text="⋮⋮",bg=T["item_bg"],fg=T["muted"],font=("Segoe UI Variable",9),cursor="fleur",width=2)
+            drag_lbl = tk.Label(row,text="⋮⋮",bg=T["item_bg"],fg=T["muted"],font=(self.cfg.get("ui_font","Segoe UI Variable"),9),cursor="fleur",width=2)
             drag_lbl.pack(side="left",padx=(0,2))
             drag_lbl.bind("<ButtonPress-1>", lambda e,t=task: self._dt_start(t))
             drag_lbl.bind("<ButtonRelease-1>", lambda e,t=task: self._dt_drop(e,t))
@@ -600,7 +609,7 @@ class App:
         chk = tk.Checkbutton(row,variable=var,bg=T["item_bg"],activebackground=T["item_bg"],selectcolor=T["check_done"] if is_done else T["item_bg"],relief="flat",bd=0,highlightthickness=0,state="disabled" if (archived or trashed or searching) else "normal",command=lambda v=var,t=task: self._toggle(t,v))
         chk.pack(side="left",padx=(2,4))
 
-        style = ("Segoe UI Variable",10,"overstrike") if is_done else ("Segoe UI Variable",10)
+        style = ("Segoe UI Variable",10,"overstrike") if is_done else (self.cfg.get("ui_font","Segoe UI Variable"),10)
         fg = T["muted"] if is_done else T["text"]
         tw = tk.Frame(row,bg=T["item_bg"]); tw.pack(side="left",fill="x",expand=True)
         lbl = tk.Label(tw,text=task["text"],bg=T["item_bg"],fg=fg,font=style,anchor="w",wraplength=210,justify="left")
@@ -628,11 +637,11 @@ class App:
         if trashed and task.get("deleted_at"):
             remain = max(0, int((datetime.timedelta(hours=TRASH_HOURS) - (now_dt() - parse_iso(task["deleted_at"]))).total_seconds() // 3600))
             meta_txt += f" · in bin ~{remain}h left"
-        meta = tk.Label(tw,text=meta_txt,bg=T["item_bg"],fg=T["archive"] if archived else T["muted"],font=("Segoe UI Variable",8),anchor="w")
+        meta = tk.Label(tw,text=meta_txt,bg=T["item_bg"],fg=T["archive"] if archived else T["muted"],font=(self.cfg.get("ui_font","Segoe UI Variable"),8),anchor="w")
         meta.pack(anchor="w")
 
         def mk_btn(txt, cmd_fn):
-            b = tk.Button(row,text=txt,command=cmd_fn,bg=T["item_bg"],fg=T["text"],relief="flat",bd=0,padx=4,pady=0,font=("Segoe UI Variable",9),cursor="hand2",activebackground=T["item_hover"])
+            b = tk.Button(row,text=txt,command=cmd_fn,bg=T["item_bg"],fg=T["text"],relief="flat",bd=0,padx=4,pady=0,font=(self.cfg.get("ui_font","Segoe UI Variable"),9),cursor="hand2",activebackground=T["item_hover"])
             b.pack(side="right"); action_buttons.append(b); return b
         if trashed:
             mk_btn("↺", lambda t=task: self._recover_task(t))
@@ -660,7 +669,7 @@ class App:
         self._inline_edit_task(parent,label,task)
 
     def _inline_edit_task(self, parent, label, task):
-        entry = tk.Entry(parent,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=("Segoe UI Variable",10))
+        entry = tk.Entry(parent,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),10))
         entry.insert(0, task.get("text",""))
         label.pack_forget(); entry.pack(anchor="w",fill="x")
         entry.focus_set(); entry.select_range(0,"end")
@@ -678,7 +687,7 @@ class App:
         entry.bind("<FocusOut>", lambda e: finish(True))
 
     def _inline_edit_subtask(self, parent, label, task, subtask):
-        entry = tk.Entry(parent,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=("Segoe UI Variable",8))
+        entry = tk.Entry(parent,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),8))
         entry.insert(0, subtask.get("text",""))
         label.pack_forget(); entry.pack(side="left",fill="x",expand=True)
         entry.focus_set(); entry.select_range(0,"end")
@@ -816,7 +825,7 @@ class App:
             self._settings_widgets["frame_bg"].append(f); self._settings_widgets["section"].append(l)
         def rowf(label,maker):
             f = tk.Frame(sf,bg=self.T["bg"]); f.pack(fill="x",padx=12,pady=4)
-            l = tk.Label(f,text=label,bg=self.T["bg"],fg=self.T["text"],font=("Segoe UI Variable",9),width=26,anchor="w")
+            l = tk.Label(f,text=label,bg=self.T["bg"],fg=self.T["text"],font=(self.cfg.get("ui_font","Segoe UI Variable"),9),width=26,anchor="w")
             l.pack(side="left")
             self._settings_widgets["frame_bg"].append(f); self._settings_widgets["label"].append(l)
             maker(f)
@@ -826,9 +835,9 @@ class App:
         note_var = tk.StringVar(value=self.cfg.get("obsidian_note_path",""))
         note_var.trace_add("write", lambda *a: (self.cfg.__setitem__("obsidian_note_path", note_var.get().strip()), save_config(self.cfg)))
         def note_row(p):
-            e=tk.Entry(p,textvariable=note_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=("Segoe UI Variable",9),highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
+            e=tk.Entry(p,textvariable=note_var,bg=self.T["entry_bg"],fg=self.T["entry_fg"],insertbackground=self.T["entry_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),9),highlightthickness=1,highlightbackground=self.T["separator"],highlightcolor=self.T["check_done"])
             e.pack(side="left",fill="x",expand=True,ipady=4)
-            b=tk.Button(p,text="📄",bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=("Segoe UI Variable",9),padx=6,cursor="hand2",command=lambda: note_var.set(filedialog.asksaveasfilename(title="Select note",defaultextension=".md",filetypes=[("Markdown","*.md"),("All","*.*")]) or note_var.get()))
+            b=tk.Button(p,text="📄",bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),9),padx=6,cursor="hand2",command=lambda: note_var.set(filedialog.asksaveasfilename(title="Select note",defaultextension=".md",filetypes=[("Markdown","*.md"),("All","*.*")]) or note_var.get()))
             b.pack(side="left",padx=(4,0))
             self._settings_widgets["entry"].append(e); self._settings_widgets["button"].append(b)
         rowf("Task note path:", note_row)
@@ -838,13 +847,14 @@ class App:
         def apply_theme():
             self.cfg["theme"] = theme_var.get(); save_config(self.cfg)
             self._retheme_main_only()
+            self.root.after(30, self._keep_settings_alive)
             self.root.after(10, self._keep_settings_alive)
             if self._settings_win and self._settings_win.winfo_exists():
                 self._settings_win.after(1, self._keep_settings_alive)
         tf = tk.Frame(sf,bg=self.T["bg"]); tf.pack(fill="x",padx=12,pady=4); self._settings_widgets["frame_bg"].append(tf)
         for i,(name,samp) in enumerate(THEMES.items()):
             f=tk.Frame(tf,bg=self.T["bg"]); f.grid(row=i//3,column=i%3,sticky="w",padx=6,pady=3)
-            r=tk.Radiobutton(f,text=name.capitalize(),variable=theme_var,value=name,bg=self.T["bg"],fg=self.T["text"],activebackground=self.T["bg"],selectcolor=self.T["entry_bg"],font=("Segoe UI Variable",9),command=apply_theme)
+            r=tk.Radiobutton(f,text=name.capitalize(),variable=theme_var,value=name,bg=self.T["bg"],fg=self.T["text"],activebackground=self.T["bg"],selectcolor=self.T["entry_bg"],font=(self.cfg.get("ui_font","Segoe UI Variable"),9),command=apply_theme)
             r.pack(side="left")
             preview_bg = samp["header_bg"]
             if name in {"dark", "crimson", "forest", "emerald", "midnight", "space", "violet-night", "eclipse"}:
@@ -873,13 +883,31 @@ class App:
         def scale_row(p):
             sc=tk.Scale(p,variable=scale_var,from_=0.5,to=3.0,resolution=0.05,orient="horizontal",bg=self.T["bg"],fg=self.T["text"],troughcolor=self.T["separator"],activebackground=self.T["btn_hover"],highlightthickness=0,bd=0,length=220,command=lambda v:(self._set_scale(float(v)), self.root.after(10, self._keep_settings_alive)))
             sc.pack(side="left")
-            lb=tk.Label(p,textvariable=scale_var,bg=self.T["bg"],fg=self.T["text"],font=("Segoe UI Variable",9),width=5)
+            lb=tk.Label(p,textvariable=scale_var,bg=self.T["bg"],fg=self.T["text"],font=(self.cfg.get("ui_font","Segoe UI Variable"),9),width=5)
             lb.pack(side="left",padx=4)
             self._settings_widgets["scale"].append(sc); self._settings_widgets["label"].append(lb)
         rowf("Scale (0.5–3.0):", scale_row)
-        m=tk.Label(sf,text="Close with Enter or window close button.",bg=self.T["bg"],fg=self.T["muted"],font=("Segoe UI Variable",8),anchor="w",padx=12)
+        m=tk.Label(sf,text="Close with Enter or window close button.",bg=self.T["bg"],fg=self.T["muted"],font=(self.cfg.get("ui_font","Segoe UI Variable"),8),anchor="w",padx=12)
         m.pack(fill="x")
         self._settings_widgets["muted"].append(m)
+
+        section("Font")
+        font_var = tk.StringVar(value=self.cfg.get("ui_font", "Segoe UI Variable"))
+        def apply_font():
+            self.cfg["ui_font"] = font_var.get()
+            save_config(self.cfg)
+            self._retheme_main_only()
+            self.root.after(30, self._keep_settings_alive)
+        ff = tk.Frame(sf, bg=self.T["bg"]); ff.pack(fill="x", padx=12, pady=4)
+        self._settings_widgets["frame_bg"].append(ff)
+        for i, fname in enumerate(UI_FONTS):
+            rf = tk.Frame(ff, bg=self.T["bg"]); rf.grid(row=i//2, column=i%2, sticky="w", padx=6, pady=2)
+            r = tk.Radiobutton(rf, text=fname, variable=font_var, value=fname,
+                bg=self.T["bg"], fg=self.T["text"], activebackground=self.T["bg"],
+                selectcolor=self.T["entry_bg"], font=(fname, 9), command=apply_font)
+            r.pack(side="left")
+            self._settings_widgets["frame_bg"].append(rf)
+            self._settings_widgets["radio"].append(r)
 
         section("Data")
         def export_fn():
@@ -899,14 +927,14 @@ class App:
             except Exception as ex:
                 messagebox.showerror("Error",str(ex),parent=win)
         br=tk.Frame(sf,bg=self.T["bg"]); br.pack(fill="x",padx=12,pady=4); self._settings_widgets["frame_bg"].append(br)
-        b1=tk.Button(br,text="⬆ Export",command=export_fn,bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=("Segoe UI Variable",9),padx=10,pady=5,cursor="hand2",activebackground=self.T["btn_hover"])
+        b1=tk.Button(br,text="⬆ Export",command=export_fn,bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),9),padx=10,pady=5,cursor="hand2",activebackground=self.T["btn_hover"])
         b1.pack(side="left",padx=(0,8))
-        b2=tk.Button(br,text="⬇ Import",command=import_fn,bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=("Segoe UI Variable",9),padx=10,pady=5,cursor="hand2",activebackground=self.T["btn_hover"])
+        b2=tk.Button(br,text="⬇ Import",command=import_fn,bg=self.T["btn_bg"],fg=self.T["btn_fg"],relief="flat",font=(self.cfg.get("ui_font","Segoe UI Variable"),9),padx=10,pady=5,cursor="hand2",activebackground=self.T["btn_hover"])
         b2.pack(side="left")
         self._settings_widgets["button"].extend([b1,b2])
 
     def _mk_check(self, parent, var, command):
-        c=tk.Checkbutton(parent,variable=var,bg=self.T["bg"],fg=self.T["text"],activebackground=self.T["bg"],selectcolor=self.T["entry_bg"],font=("Segoe UI Variable",9),command=command)
+        c=tk.Checkbutton(parent,variable=var,bg=self.T["bg"],fg=self.T["text"],activebackground=self.T["bg"],selectcolor=self.T["entry_bg"],font=(self.cfg.get("ui_font","Segoe UI Variable"),9),command=command)
         c.pack(side="left")
         self._settings_widgets["check"].append(c)
         return c
@@ -1026,9 +1054,7 @@ if __name__ == "__main__":
     def _keep_settings_alive(self):
         if self._settings_win and self._settings_win.winfo_exists():
             try:
-                self._settings_win.deiconify()
                 self._settings_win.lift()
                 self._settings_win.attributes("-topmost", True)
-                self._settings_win.focus_force()
             except Exception:
                 pass
