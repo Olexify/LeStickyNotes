@@ -4,7 +4,7 @@ A **lightweight, standalone sticky notes / task app for Windows** with optional 
 
 Made for the “let me jot this down real quick” moments - without Electron bloat, cloud accounts, or productivity theater. On image you can see the Obsidian live integration as backup of solved tasks.
 
-<img width="1904" height="1440" alt="LeoNote screenshot" src="https://github.com/user-attachments/assets/51683988-0b99-4197-885e-b099a5ad3639" />
+<img width="1910" height="1440" alt="LeoNote screenshot" src="https://github.com/user-attachments/assets/0eeea64e-5415-4a55-9218-6dcd9f6ee06a" />
 
 ---
 
