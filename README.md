@@ -1,8 +1,26 @@
 # 📝 Leo Note
 
-A **lightweight, standalone sticky notes / task app for Windows** with optional **Obsidian** integration.
+> *Quick, narrow-focus workflow — just like bullets passing by. You set a task, you complete a task. You shoot down tasks one by one like a cold-headed sniper.*
 
-Made for the “let me jot this down real quick” moments - without Electron bloat, cloud accounts, or productivity theater. On image you can see the Obsidian live integration as backup of solved tasks.
+**A lightweight, standalone sticky notes & task app for Windows** — with optional [Obsidian](https://obsidian.md) integration.
+
+---
+
+## ✨ Why Leo Note?
+
+Built for the **"let me jot this down real quick"** moments.
+
+- 🪶 **No Electron bloat** — native, fast, and minimal
+- 🔒 **No cloud accounts** — your notes stay local
+- 🎭 **No productivity theater** — just tasks in, tasks out
+- 🟣 **Optional Obsidian sync** — solved tasks backed up automatically
+
+---
+
+## 🔗 Obsidian Integration
+
+![Obsidian live integration preview](your-screenshot.png)
+*Live integration: completed tasks are archived directly into your Obsidian vault.*
 
 <img width="1914" height="1440" alt="LeoNote screenshot" src="https://github.com/user-attachments/assets/a8a543c6-6371-474a-9371-d448c87266d4" />
 
@@ -22,6 +40,9 @@ Made for the “let me jot this down real quick” moments - without Electron bl
 - 🔔 Optional **system tray** support
 - 📥 **Import / Export** tasks as JSON
 - 🪨 **Local-first**: saves config + tasks as JSON in your home folder
+- 📅 **Habits** daily tracker with one-click check-ins and streaks
+- 🎮 **Game** - earn XP and level up by completing tasks and checking in habits
+- 📄 **Docs** local text snippets for reusable templates (speeches, emails, prompts)
 <!-- 
 ---
 
