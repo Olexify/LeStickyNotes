@@ -1,8 +1,8 @@
 # 📝 Leo Note
 
-> *Quick, narrow-focus workflow — just like bullets passing by. You set a task, you complete a task. You shoot down tasks one by one like a cold-headed sniper.*
+> *Quick, narrow-focus workflow - just like bullets passing by. You set a task, you complete a task. You shoot down tasks one by one like a cold-headed sniper.*
 
-**A lightweight, standalone sticky notes & task app for Windows** — with optional [Obsidian](https://obsidian.md) integration.
+**A lightweight, standalone sticky notes & task app for Windows** - with optional [Obsidian](https://obsidian.md) integration.
 
 ---
 
@@ -10,10 +10,10 @@
 
 Built for the **"let me jot this down real quick"** moments.
 
-- 🪶 **No Electron bloat** — native, fast, and minimal
-- 🔒 **No cloud accounts** — your notes stay local
-- 🎭 **No productivity theater** — just tasks in, tasks out
-- 🟣 **Optional Obsidian sync** — solved tasks backed up automatically
+- 🪶 **No Electron bloat** - native, fast, and minimal
+- 🔒 **No cloud accounts** - your notes stay local
+- 🎭 **No productivity theater** - just tasks in, tasks out
+- 🟣 **Optional Obsidian sync** - solved tasks backed up automatically
 
 ---
 
