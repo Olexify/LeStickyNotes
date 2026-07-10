@@ -295,6 +295,26 @@ class App:
         self.cfg.setdefault("xp", 0)
         self.cfg.setdefault("tasks_created", 0)
         self.cfg.setdefault("tasks_done", 0)
+        # pomodoro
+        self.cfg.setdefault("pomo_work_mins", 20)
+        self.cfg.setdefault("pomo_break_mins", 3)
+        self.cfg.setdefault("pomo_tick_volume", 0.15)
+        self.cfg.setdefault("pomo_tick_enabled", True)
+        self.cfg.setdefault("pomo_alert_enabled", True)
+        self.cfg.setdefault("pomo_alert_volume", 0.8)
+        self.cfg.setdefault("pomo_work_color", "#e05c5c")
+        self.cfg.setdefault("pomo_break_color", "#4caf88")
+        self.cfg.setdefault("pomo_total_work_secs", 0)
+        self.cfg.setdefault("pomo_total_break_secs", 0)
+        # pomodoro runtime state (not persisted between sessions)
+        self._pomo_running = False
+        self._pomo_phase   = "work"   # "work" or "break"
+        self._pomo_secs    = self.cfg["pomo_work_mins"] * 60
+        self._pomo_job     = None
+        self._pomo_tick_job= None
+        self._pomo_phase_start = None  # datetime when current phase began
+        self._pomo_lbl     = None      # timer label widget in status bar
+        self._pomo_play_btn= None
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -506,11 +526,28 @@ class App:
         # root-level scroll handled by _bind_ctrl_wheel_recursive after build
 
         tk.Frame(self.main,bg=self.T["separator"],height=1).pack(fill="x")
+        # ── bottom bar: status + pomodoro controls ───────────────────────────
+        bot = tk.Frame(self.main,bg=self.T["header_bg"]); bot.pack(fill="x")
         self.status_var = tk.StringVar()
-        self.status_lbl = tk.Label(self.main,textvariable=self.status_var,
+        self.status_lbl = tk.Label(bot,textvariable=self.status_var,
             bg=self.T["header_bg"],fg=self.T["text"],
             font=(self.cfg.get("ui_font","Segoe UI Variable"),8),anchor="w",padx=8,pady=4)
-        self.status_lbl.pack(fill="x")
+        self.status_lbl.pack(side="left",fill="x",expand=True)
+        # pomodoro timer label (hidden until running)
+        self._pomo_lbl = tk.Label(bot,text="",bg=self.T["header_bg"],fg=self.T["text"],
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),8,"bold"),padx=4,pady=4)
+        self._pomo_lbl.pack(side="right")
+        # play/pause button
+        self._pomo_play_btn = tk.Button(bot,text="▶",command=self._pomo_toggle,
+            bg=self.T["header_bg"],fg=self.T["text"],relief="flat",bd=0,
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),9),
+            padx=4,pady=2,cursor="hand2",activebackground=self.T["btn_hover"])
+        self._pomo_play_btn.pack(side="right")
+        # clock icon → open settings
+        tk.Button(bot,text="⏱",command=self._open_pomo_settings,
+            bg=self.T["header_bg"],fg=self.T["text"],relief="flat",bd=0,
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),9),
+            padx=4,pady=2,cursor="hand2",activebackground=self.T["btn_hover"]).pack(side="right")
         self._render_tasks()
         self.root.after(50, lambda: self._bind_ctrl_wheel_recursive(self.main))
 
@@ -1060,6 +1097,186 @@ class App:
         msgs = ["Keep it up! 🚀","You are on a roll! 🔥","Great progress! ✨","Unstoppable! 💪"]
         tk.Label(f,text=msgs[lvl % len(msgs)],bg=T["bg"],fg=T["archive"],
             font=(self.cfg.get("ui_font","Segoe UI Variable"),9,"italic"),pady=8).pack(anchor="w")
+
+        # ── Pomodoro statistics ────────────────────────────────────────────
+        tk.Frame(f,bg=T["separator"],height=1).pack(fill="x",pady=(4,8))
+        tk.Label(f,text="⏱  Focus Time",bg=T["bg"],fg=T["text"],
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),10,"bold")).pack(anchor="w",pady=(0,4))
+
+        work_secs  = self.cfg.get("pomo_total_work_secs", 0)
+        break_secs = self.cfg.get("pomo_total_break_secs", 0)
+        total_secs = work_secs + break_secs
+
+        def _fmt_dur(s):
+            h = s // 3600; m = (s % 3600) // 60
+            return f"{h}h {m:02d}m" if h > 0 else f"{m}m {s%60:02d}s"
+
+        pf = tk.Frame(f, bg=T["bg"]); pf.pack(fill="x")
+        pf.columnconfigure(1, weight=1)
+        rows_p = [
+            ("💼 Work time:",     _fmt_dur(work_secs),  self.cfg.get("pomo_work_color","#e05c5c")),
+            ("☕ Break time:",    _fmt_dur(break_secs), self.cfg.get("pomo_break_color","#4caf88")),
+            ("🕐 Total tracked:", _fmt_dur(total_secs), T["text"]),
+        ]
+        for i,(lbl_t,val_t,col) in enumerate(rows_p):
+            tk.Label(pf,text=lbl_t,bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),
+                anchor="w").grid(row=i,column=0,sticky="w",pady=1)
+            tk.Label(pf,text=val_t,bg=T["bg"],fg=col,
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8,"bold"),
+                anchor="e").grid(row=i,column=1,sticky="e",pady=1)
+        if total_secs > 0:
+            work_pct = int(100 * work_secs / total_secs)
+            tk.Label(f,text=f"Work ratio: {work_pct}%  |  Break: {100-work_pct}%",
+                bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),pady=2).pack(anchor="w")
+            bar_c = tk.Canvas(f,bg=T["bg"],height=10,bd=0,highlightthickness=0)
+            bar_c.pack(fill="x",pady=(2,6))
+            def _draw_pbar(e=None, wc=work_secs, tc=total_secs):
+                bw = bar_c.winfo_width() or 200
+                bar_c.delete("all")
+                ww = int(bw * wc / tc)
+                if ww > 0:
+                    bar_c.create_rectangle(0,0,ww,10,
+                        fill=self.cfg.get("pomo_work_color","#e05c5c"),outline="")
+                if ww < bw:
+                    bar_c.create_rectangle(ww,0,bw,10,
+                        fill=self.cfg.get("pomo_break_color","#4caf88"),outline="")
+            bar_c.bind("<Configure>", _draw_pbar)
+            self.root.after(120, _draw_pbar)
+        else:
+            tk.Label(f,text="Start the timer to track focus time ⏱",
+                bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),pady=4).pack(anchor="w")
+
+        # ── Pomodoro statistics ────────────────────────────────────────────
+        tk.Frame(f,bg=T["separator"],height=1).pack(fill="x",pady=(4,8))
+        tk.Label(f,text="⏱  Focus Time",bg=T["bg"],fg=T["text"],
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),10,"bold")).pack(anchor="w",pady=(0,4))
+
+        work_secs  = self.cfg.get("pomo_total_work_secs", 0)
+        break_secs = self.cfg.get("pomo_total_break_secs", 0)
+        total_secs = work_secs + break_secs
+
+        def _fmt_dur(s):
+            h = s // 3600; m = (s % 3600) // 60
+            return f"{h}h {m:02d}m" if h > 0 else f"{m}m {s%60:02d}s"
+
+        pf = tk.Frame(f, bg=T["bg"]); pf.pack(fill="x")
+        pf.columnconfigure(1, weight=1)
+        rows_p = [
+            ("💼 Work time:",   _fmt_dur(work_secs),  self.cfg.get("pomo_work_color","#e05c5c")),
+            ("☕ Break time:",  _fmt_dur(break_secs), self.cfg.get("pomo_break_color","#4caf88")),
+            ("🕐 Total tracked:", _fmt_dur(total_secs), T["text"]),
+        ]
+        for i,(lbl_t,val_t,col) in enumerate(rows_p):
+            tk.Label(pf,text=lbl_t,bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),
+                anchor="w").grid(row=i,column=0,sticky="w",pady=1)
+            tk.Label(pf,text=val_t,bg=T["bg"],fg=col,
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8,"bold"),
+                anchor="e").grid(row=i,column=1,sticky="e",pady=1)
+        if total_secs > 0:
+            work_pct = int(100 * work_secs / total_secs)
+            tk.Label(f,text=f"Work ratio: {work_pct}%  |  Break: {100-work_pct}%",
+                bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),pady=2).pack(anchor="w")
+            bar_c = tk.Canvas(f, bg=T["bg"], height=10, bd=0, highlightthickness=0)
+            bar_c.pack(fill="x", pady=(2,6))
+            def _draw_pbar(e=None, wc=work_secs, tc=total_secs):
+                bw = bar_c.winfo_width() or 200
+                bar_c.delete("all")
+                ww = int(bw * wc / tc)
+                if ww > 0:
+                    bar_c.create_rectangle(0,0,ww,10,
+                        fill=self.cfg.get("pomo_work_color","#e05c5c"),outline="")
+                if ww < bw:
+                    bar_c.create_rectangle(ww,0,bw,10,
+                        fill=self.cfg.get("pomo_break_color","#4caf88"),outline="")
+            bar_c.bind("<Configure>", _draw_pbar)
+            self.root.after(120, _draw_pbar)
+        else:
+            tk.Label(f,text="Start the timer to track focus time ⏱",
+                bg=T["bg"],fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),8),pady=4).pack(anchor="w")
+
+        # ── Daily activity heatmap ─────────────────────────────────────────
+        tk.Frame(f,bg=T["separator"],height=1).pack(fill="x",pady=(6,6))
+        tk.Label(f,text="📅  Daily Work Heatmap (last 60 days)",bg=T["bg"],fg=T["text"],
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),9,"bold")).pack(anchor="w",pady=(0,4))
+
+        # color bands: work seconds thresholds
+        _HMAP_BANDS = [
+            (0,         T["item_bg"]),       # 0 min  – blank/theme default
+            (1800,      "#e05c5c"),           # <30 min – red
+            (3600,      "#f4a623"),           # <1 h   – orange
+            (7200,      "#f4e040"),           # <2 h   – yellow
+            (14400,     "#4caf88"),           # <4 h   – green
+            (21600,     "#29b6d8"),           # <6 h   – cyan/blue
+            (999999,    "#a855f7"),           # ≥6 h   – purple
+        ]
+        def _day_color(secs):
+            for threshold, color in reversed(_HMAP_BANDS):
+                if secs >= threshold:
+                    return color
+            return T["item_bg"]
+
+        daily = self.cfg.get("pomo_daily", {})
+        today = datetime.date.today()
+        days  = [(today - datetime.timedelta(days=i)) for i in range(59, -1, -1)]
+
+        # legend
+        leg_f = tk.Frame(f, bg=T["bg"]); leg_f.pack(anchor="w", pady=(0,4))
+        legend_items = [
+            ("None", T["item_bg"]),
+            ("<30m", "#e05c5c"),
+            ("<1h",  "#f4a623"),
+            ("<2h",  "#f4e040"),
+            ("<4h",  "#4caf88"),
+            ("<6h",  "#29b6d8"),
+            ("6h+",  "#a855f7"),
+        ]
+        for txt, col in legend_items:
+            li = tk.Frame(leg_f, bg=T["bg"]); li.pack(side="left", padx=(0,6))
+            tk.Frame(li, bg=col, width=10, height=10, relief="flat").pack(side="left", padx=(0,2))
+            tk.Label(li, text=txt, bg=T["bg"], fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),7)).pack(side="left")
+
+        # grid of day squares: 10 rows × 6 columns = 60 days
+        COLS = 10
+        heat_f = tk.Frame(f, bg=T["bg"]); heat_f.pack(anchor="w", pady=(0,6))
+        for i, day in enumerate(days):
+            row, col = divmod(i, COLS)
+            day_key  = day.isoformat()
+            day_data = daily.get(day_key, {})
+            w_secs   = day_data.get("work", 0)
+            b_secs   = day_data.get("break", 0)
+            color    = _day_color(w_secs)
+            tip_text = (f"{day_key}\n💼 {w_secs//60}m work\n☕ {b_secs//60}m break"
+                        if (w_secs or b_secs) else day_key)
+            sq = tk.Frame(heat_f, bg=color, width=16, height=16,
+                relief="flat", bd=1)
+            sq.grid(row=row, column=col, padx=1, pady=1)
+            sq.grid_propagate(False)
+            # tooltip on hover
+            tip_lbl = [None]
+            def _enter_sq(e, t=tip_text, s=sq):
+                tl = tk.Toplevel(self.root)
+                tl.overrideredirect(True)
+                tl.attributes("-topmost", True)
+                tl.configure(bg=T["header_bg"])
+                tk.Label(tl, text=t, bg=T["header_bg"], fg=T["text"],
+                    font=(self.cfg.get("ui_font","Segoe UI Variable"),8),
+                    padx=6, pady=3, justify="left").pack()
+                tl.geometry(f"+{e.x_root+12}+{e.y_root+12}")
+                tip_lbl[0] = tl
+            def _leave_sq(e):
+                if tip_lbl[0]:
+                    try: tip_lbl[0].destroy()
+                    except Exception: pass
+                    tip_lbl[0] = None
+            sq.bind("<Enter>", _enter_sq)
+            sq.bind("<Leave>", _leave_sq)
 
     # ── feature 8: Docs hub (square grid, trash, singleton window, inline rename) ─
     # ── helper: scan backup dir and import any .md files not yet in docs ──────
@@ -2511,6 +2728,16 @@ class App:
         self.root.after(600, restore)
 
     def _close(self):
+        # cancel pomodoro timers cleanly before quit
+        if self._pomo_running:
+            self._pomo_accumulate()
+        if self._pomo_job:
+            try: self.root.after_cancel(self._pomo_job)
+            except Exception: pass
+        if self._pomo_tick_job:
+            try: self.root.after_cancel(self._pomo_tick_job)
+            except Exception: pass
+
         save_config(self.cfg); save_tasks(self.tasks); self._destroy_tray(); self.root.destroy()
 
     def _drag_start(self, e):
@@ -2570,6 +2797,392 @@ class App:
         if self._settings_win and self._settings_win.winfo_exists():
             try: self._settings_win.lift(); self._settings_win.attributes("-topmost",True)
             except Exception: pass
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # POMODORO
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _pomo_init_mixer(self):
+        pass  # no-op: using winsound (built-in, no dependencies)
+
+    def _pomo_sound(self, name, volume=0.8):
+        """Play sounds/<name>.wav non-blocking using winsound (built-in, Windows only)."""
+        import threading
+        path = resource_path(os.path.join("sounds", name))
+        if not os.path.exists(path): return
+        def _play():
+            try:
+                import winsound
+                winsound.PlaySound(path,
+                    winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            except Exception:
+                try:  # macOS/Linux fallback
+                    import subprocess as _sp
+                    _sp.Popen(["afplay", path], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                except Exception: pass
+        threading.Thread(target=_play, daemon=True).start()
+
+    def _pomo_toggle(self):
+        if self._pomo_running:
+            self._pomo_pause()
+        else:
+            self._pomo_start()
+
+    def _pomo_start(self):
+        first_start = not getattr(self, "_pomo_ever_started", False)
+        self._pomo_ever_started = True
+        self._pomo_running = True
+        self._pomo_phase_start = now_dt()
+        if self._pomo_play_btn and self._pomo_play_btn.winfo_exists():
+            self._pomo_play_btn.configure(text="⏸", fg="#ef4444",
+                activeforeground="#ef4444")
+        if first_start and self.cfg.get("pomo_alert_enabled", True):
+            self._pomo_sound("workstart.wav",
+                volume=self.cfg.get("pomo_alert_volume", 0.8))
+        self._pomo_schedule_tick()
+        self._pomo_schedule_step()
+
+    def _pomo_pause(self):
+        # accumulate elapsed time into totals before pausing
+        self._pomo_accumulate()
+        self._pomo_running = False
+        if self._pomo_job:
+            self.root.after_cancel(self._pomo_job); self._pomo_job = None
+        if self._pomo_tick_job:
+            self.root.after_cancel(self._pomo_tick_job); self._pomo_tick_job = None
+        if self._pomo_play_btn and self._pomo_play_btn.winfo_exists():
+            self._pomo_play_btn.configure(text="▶", fg=self.T["text"],
+                activeforeground=self.T["text"])
+        self._pomo_update_label()
+        save_config(self.cfg)
+
+    def _pomo_accumulate(self):
+        """Add elapsed seconds since phase_start to totals + daily log; grant 1 XP per work minute."""
+        if self._pomo_phase_start is None: return
+        elapsed = int((now_dt() - self._pomo_phase_start).total_seconds())
+        if elapsed <= 0: return
+        today_key = datetime.date.today().isoformat()
+        daily = self.cfg.setdefault("pomo_daily", {})
+        day   = daily.setdefault(today_key, {"work": 0, "break": 0})
+        if self._pomo_phase == "work":
+            prev_work = self.cfg.get("pomo_total_work_secs", 0)
+            new_work  = prev_work + elapsed
+            self.cfg["pomo_total_work_secs"] = new_work
+            day["work"] = day.get("work", 0) + elapsed
+            # 1 XP per complete work minute
+            xp_gained = (new_work // 60) - (prev_work // 60)
+            if xp_gained > 0:
+                self.cfg["xp"] = self.cfg.get("xp", 0) + xp_gained
+        else:
+            self.cfg["pomo_total_break_secs"] = self.cfg.get("pomo_total_break_secs", 0) + elapsed
+            day["break"] = day.get("break", 0) + elapsed
+        self._pomo_phase_start = now_dt()  # reset so we don't double-count
+
+    def _pomo_schedule_step(self):
+        """Called every second to countdown the timer."""
+        if not self._pomo_running: return
+        self._pomo_secs -= 1
+        self._pomo_update_label()
+        if self._pomo_secs <= 0:
+            self._pomo_accumulate()
+            self._pomo_next_phase()
+        else:
+            self._pomo_job = self.root.after(1000, self._pomo_schedule_step)
+
+    def _pomo_next_phase(self):
+        alert_vol = self.cfg.get("pomo_alert_volume", 0.8)
+        if self._pomo_phase == "work":
+            self._pomo_phase = "break"
+            self._pomo_secs  = self.cfg.get("pomo_break_mins", 3) * 60
+            if self.cfg.get("pomo_alert_enabled", True):
+                self._pomo_sound("breakstart.wav", volume=alert_vol)
+        else:
+            self._pomo_phase = "work"
+            self._pomo_secs  = self.cfg.get("pomo_work_mins", 20) * 60
+            if self.cfg.get("pomo_alert_enabled", True):
+                self._pomo_sound("workstart.wav", volume=alert_vol)
+        self._pomo_phase_start = now_dt()
+        self._pomo_update_label()
+        self._pomo_job = self.root.after(1000, self._pomo_schedule_step)
+
+    def _pomo_schedule_tick(self):
+        """Play a random tick sound (1–16) every second if enabled and running."""
+        if not self._pomo_running: return
+        if self.cfg.get("pomo_tick_enabled", True):
+            import random as _rnd
+            n = _rnd.randint(1, 16)
+            self._pomo_sound(f"clockticksound{n}.wav",
+                volume=self.cfg.get("pomo_tick_volume", 0.15))
+        self._pomo_tick_job = self.root.after(1000, self._pomo_schedule_tick)
+
+    def _pomo_update_label(self):
+        if not (self._pomo_lbl and self._pomo_lbl.winfo_exists()): return
+        if not self._pomo_running and self._pomo_secs == self.cfg.get("pomo_work_mins",20)*60:
+            self._pomo_lbl.configure(text="")
+            return
+        m, s = divmod(max(0, self._pomo_secs), 60)
+        phase_color = self.cfg.get("pomo_work_color","#e05c5c") if self._pomo_phase=="work" else self.cfg.get("pomo_break_color","#4caf88")
+        icon = "💼" if self._pomo_phase == "work" else "☕"
+        self._pomo_lbl.configure(text=f"{icon} {m:02d}:{s:02d}", fg=phase_color)
+
+    def _fmt_duration(self, total_secs):
+        h = total_secs // 3600
+        m = (total_secs % 3600) // 60
+        if h > 0: return f"{h}h {m:02d}m"
+        return f"{m}m"
+
+    def _open_pomo_settings(self):
+        # singleton – if already open, bring to front unconditionally
+        for w in self.root.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "_is_pomo_win", False):
+                w.deiconify(); w.lift(); w.focus_force()
+                w.attributes("-topmost", True)
+                return
+        T = self.T
+        win = tk.Toplevel(self.root)
+        win._is_pomo_win = True
+        win.title("Pomodoro")
+        win.configure(bg=T["bg"])
+        win.attributes("-topmost", True)
+        # restore saved geometry or use a larger default
+        _pomo_geo = self.cfg.get("pomo_win_geometry", "400x720")
+        win.geometry(_pomo_geo)
+        win.resizable(True, True)
+        def _save_pomo_geo(e=None):
+            if win.winfo_exists():
+                self.cfg["pomo_win_geometry"] = win.geometry()
+                save_config(self.cfg)
+        win.bind("<Configure>", _save_pomo_geo)
+
+        font_n  = (self.cfg.get("ui_font","Segoe UI Variable"), 9)
+        font_b  = (self.cfg.get("ui_font","Segoe UI Variable"), 9, "bold")
+        font_lg = (self.cfg.get("ui_font","Segoe UI Variable"), 36, "bold")
+
+        def lbl(parent, text, **kw):
+            return tk.Label(parent, text=text, bg=T["bg"], fg=T["text"], font=font_n, **kw)
+        def sec_lbl(parent, text):
+            f = tk.Frame(parent, bg=T["header_bg"]); f.pack(fill="x", pady=(8,2))
+            tk.Label(f, text=text, bg=T["header_bg"], fg=T["text"],
+                font=font_b, anchor="w", padx=8, pady=3).pack(fill="x")
+            return f
+
+        scroll_canvas = tk.Canvas(win, bg=T["bg"], bd=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(win, orient="vertical", command=scroll_canvas.yview,
+            style="LeSticky.Vertical.TScrollbar")
+        scroll_canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        scroll_canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(scroll_canvas, bg=T["bg"])
+        _cw2 = scroll_canvas.create_window((0,0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: scroll_canvas.configure(
+            scrollregion=scroll_canvas.bbox("all")))
+        scroll_canvas.bind("<Configure>", lambda e: scroll_canvas.itemconfig(_cw2, width=e.width))
+        for w in (scroll_canvas, inner):
+            w.bind("<MouseWheel>", lambda e: scroll_canvas.yview_scroll(
+                -1 if e.delta>0 else 1, "units"))
+
+        # ── TIMER DISPLAY ─────────────────────────────────────────────────
+        sec_lbl(inner, "⏱  Timer")
+        timer_frame = tk.Frame(inner, bg=T["bg"]); timer_frame.pack(fill="x", padx=12, pady=6)
+        phase_color = self.cfg.get("pomo_work_color","#e05c5c") if self._pomo_phase=="work" else self.cfg.get("pomo_break_color","#4caf88")
+        m0, s0 = divmod(max(0, self._pomo_secs), 60)
+        timer_lbl = tk.Label(timer_frame, text=f"{m0:02d}:{s0:02d}",
+            bg=T["bg"], fg=phase_color, font=font_lg)
+        timer_lbl.pack()
+        phase_indicator = tk.Label(timer_frame,
+            text=("💼 Work" if self._pomo_phase=="work" else "☕ Break"),
+            bg=T["bg"], fg=T["muted"], font=font_n)
+        phase_indicator.pack()
+
+        # play/pause button inside popup
+        _popup_btn_colors = {"run": "#ef4444", "idle": T["check_done"]}
+        _popup_toggle_btn = [None]
+        def _toggle_in_win():
+            self._pomo_toggle()
+            if _popup_toggle_btn[0] and _popup_toggle_btn[0].winfo_exists():
+                if self._pomo_running:
+                    _popup_toggle_btn[0].configure(text="⏸ Pause",
+                        bg=_popup_btn_colors["run"])
+                else:
+                    _popup_toggle_btn[0].configure(text="▶ Start",
+                        bg=_popup_btn_colors["idle"])
+        _init_bg = _popup_btn_colors["run"] if self._pomo_running else _popup_btn_colors["idle"]
+        _init_txt = "⏸ Pause" if self._pomo_running else "▶ Start"
+        _ptbtn = tk.Button(timer_frame, text=_init_txt, command=_toggle_in_win,
+            bg=_init_bg, fg="#ffffff", relief="flat",
+            font=font_b, padx=16, pady=6, cursor="hand2",
+            activebackground=T["btn_hover"])
+        _ptbtn.pack(pady=(8,0))
+        _popup_toggle_btn[0] = _ptbtn
+
+        # live-update the timer label every second
+        _timer_job = [None]
+        def _refresh_timer():
+            if not win.winfo_exists(): return
+            pc = self.cfg.get("pomo_work_color","#e05c5c") if self._pomo_phase=="work" else self.cfg.get("pomo_break_color","#4caf88")
+            m2, s2 = divmod(max(0, self._pomo_secs), 60)
+            timer_lbl.configure(text=f"{m2:02d}:{s2:02d}", fg=pc)
+            phase_indicator.configure(text="💼 Work" if self._pomo_phase=="work" else "☕ Break")
+            if _popup_toggle_btn[0] and _popup_toggle_btn[0].winfo_exists():
+                if self._pomo_running:
+                    _popup_toggle_btn[0].configure(text="⏸ Pause",
+                        bg=_popup_btn_colors["run"])
+                else:
+                    _popup_toggle_btn[0].configure(text="▶ Start",
+                        bg=_popup_btn_colors["idle"])
+            _timer_job[0] = win.after(500, _refresh_timer)
+        _refresh_timer()
+        win.protocol("WM_DELETE_WINDOW", lambda: (
+            win.after_cancel(_timer_job[0]) if _timer_job[0] else None, win.destroy()))
+
+        # ── SETTINGS ──────────────────────────────────────────────────────
+        sec_lbl(inner, "⚙  Settings")
+        sf = tk.Frame(inner, bg=T["bg"]); sf.pack(fill="x", padx=12, pady=4)
+
+        def _autosave():
+            save_config(self.cfg)
+
+        # Work interval
+        lbl(sf, "Work interval (minutes):").grid(row=0, column=0, sticky="w", pady=2)
+        work_var = tk.IntVar(value=self.cfg.get("pomo_work_mins",20))
+        tk.Spinbox(sf, from_=1, to=120, textvariable=work_var, width=5,
+            bg=T["entry_bg"], fg=T["entry_fg"], buttonbackground=T["btn_bg"],
+            relief="flat", font=font_n).grid(row=0, column=1, sticky="w", padx=(8,0), pady=2)
+
+        # Break interval
+        lbl(sf, "Break interval (minutes):").grid(row=1, column=0, sticky="w", pady=2)
+        break_var = tk.IntVar(value=self.cfg.get("pomo_break_mins",3))
+        tk.Spinbox(sf, from_=1, to=60, textvariable=break_var, width=5,
+            bg=T["entry_bg"], fg=T["entry_fg"], buttonbackground=T["btn_bg"],
+            relief="flat", font=font_n).grid(row=1, column=1, sticky="w", padx=(8,0), pady=2)
+
+        # Save intervals button (only this requires explicit save)
+        def _save_intervals():
+            self.cfg["pomo_work_mins"]  = int(work_var.get())
+            self.cfg["pomo_break_mins"] = int(break_var.get())
+            if not self._pomo_running:
+                self._pomo_phase = "work"
+                self._pomo_secs  = self.cfg["pomo_work_mins"] * 60
+                self._pomo_update_label()
+            save_config(self.cfg)
+        tk.Button(sf, text="💾 Save intervals", command=_save_intervals,
+            bg=T["btn_bg"], fg=T["btn_fg"], relief="flat",
+            font=font_b, padx=12, pady=4, cursor="hand2",
+            activebackground=T["btn_hover"]).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(6,8))
+
+        # ── Tick sound ──
+        lbl(sf, "── Tick sound ──").grid(row=3, column=0, columnspan=2, sticky="w", pady=(4,0))
+        tick_var = tk.BooleanVar(value=self.cfg.get("pomo_tick_enabled",True))
+        def _on_tick_toggle():
+            self.cfg["pomo_tick_enabled"] = tick_var.get(); _autosave()
+        tk.Checkbutton(sf, text="Ticking sound enabled", variable=tick_var,
+            command=_on_tick_toggle,
+            bg=T["bg"], fg=T["text"], activebackground=T["bg"],
+            selectcolor=T["entry_bg"], font=font_n).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=2)
+
+        lbl(sf, "Volume: use system mixer").grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
+
+        # ── Alert sounds (work/break start) ──
+        lbl(sf, "── Alert sounds ──").grid(row=6, column=0, columnspan=2, sticky="w", pady=(8,0))
+        alert_var = tk.BooleanVar(value=self.cfg.get("pomo_alert_enabled",True))
+        def _on_alert_toggle():
+            self.cfg["pomo_alert_enabled"] = alert_var.get(); _autosave()
+        tk.Checkbutton(sf, text="Work/break start sounds enabled", variable=alert_var,
+            command=_on_alert_toggle,
+            bg=T["bg"], fg=T["text"], activebackground=T["bg"],
+            selectcolor=T["entry_bg"], font=font_n).grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=2)
+
+        lbl(sf, "Volume: use system mixer").grid(row=8, column=0, columnspan=2, sticky="w", pady=2)
+
+        # ── Colors ──
+        lbl(sf, "── Timer colors ──").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8,0))
+        work_col_var = [self.cfg.get("pomo_work_color","#e05c5c")]
+        work_col_btn = tk.Button(sf, text="  ", bg=work_col_var[0], relief="flat",
+            width=3, cursor="hand2")
+        lbl(sf, "Work-time color:").grid(row=10, column=0, sticky="w", pady=2)
+        work_col_btn.grid(row=10, column=1, sticky="w", padx=(8,0), pady=2)
+        def _pick_work_color():
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(color=work_col_var[0], parent=win, title="Work color")
+            if c and c[1]:
+                work_col_var[0] = c[1]; work_col_btn.configure(bg=c[1])
+                self.cfg["pomo_work_color"] = c[1]; _autosave()
+        work_col_btn.configure(command=_pick_work_color)
+
+        lbl(sf, "Break-time color:").grid(row=11, column=0, sticky="w", pady=2)
+        break_col_var = [self.cfg.get("pomo_break_color","#4caf88")]
+        break_col_btn = tk.Button(sf, text="  ", bg=break_col_var[0], relief="flat",
+            width=3, cursor="hand2")
+        break_col_btn.grid(row=11, column=1, sticky="w", padx=(8,0), pady=2)
+        def _pick_break_color():
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(color=break_col_var[0], parent=win, title="Break color")
+            if c and c[1]:
+                break_col_var[0] = c[1]; break_col_btn.configure(bg=c[1])
+                self.cfg["pomo_break_color"] = c[1]; _autosave()
+        break_col_btn.configure(command=_pick_break_color)
+
+        # ── STATISTICS ────────────────────────────────────────────────────
+        sec_lbl(inner, "📊  Statistics")
+        stf = tk.Frame(inner, bg=T["bg"]); stf.pack(fill="x", padx=12, pady=8)
+
+        def _stat_row(parent, label, value, row):
+            tk.Label(parent, text=label, bg=T["bg"], fg=T["muted"],
+                font=font_n, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
+            tk.Label(parent, text=value, bg=T["bg"], fg=T["text"],
+                font=font_b, anchor="e").grid(row=row, column=1, sticky="e", padx=(16,0), pady=3)
+
+        work_secs  = self.cfg.get("pomo_total_work_secs",0)
+        break_secs = self.cfg.get("pomo_total_break_secs",0)
+        total_secs = work_secs + break_secs
+        work_pct   = int(100 * work_secs / total_secs) if total_secs > 0 else 0
+        break_pct  = 100 - work_pct if total_secs > 0 else 0
+
+        _stat_row(stf, "Total focused work time:", self._fmt_duration(work_secs), 0)
+        _stat_row(stf, "Total break time:",        self._fmt_duration(break_secs), 1)
+        _stat_row(stf, "Total tracked time:",      self._fmt_duration(total_secs), 2)
+        _stat_row(stf, "Work ratio:",              f"{work_pct}%", 3)
+        _stat_row(stf, "Break ratio:",             f"{break_pct}%", 4)
+        stf.columnconfigure(0, weight=1)
+        stf.columnconfigure(1, weight=0)
+
+        # mini bar chart
+        if total_secs > 0:
+            bar_frame = tk.Frame(inner, bg=T["bg"]); bar_frame.pack(fill="x", padx=12, pady=(0,8))
+            bar_canvas = tk.Canvas(bar_frame, bg=T["bg"], height=18,
+                bd=0, highlightthickness=0)
+            bar_canvas.pack(fill="x")
+            def _draw_bar(e=None):
+                w2 = bar_canvas.winfo_width() or 280
+                bar_canvas.delete("all")
+                work_w = int(w2 * work_pct / 100)
+                if work_w > 0:
+                    bar_canvas.create_rectangle(0, 0, work_w, 18,
+                        fill=self.cfg.get("pomo_work_color","#e05c5c"), outline="")
+                if work_w < w2:
+                    bar_canvas.create_rectangle(work_w, 0, w2, 18,
+                        fill=self.cfg.get("pomo_break_color","#4caf88"), outline="")
+            bar_canvas.bind("<Configure>", _draw_bar)
+            win.after(100, _draw_bar)
+
+        # Reset stats button
+        def _reset_stats():
+            if messagebox.askyesno("Reset stats",
+                    "Reset all pomodoro statistics?", parent=win):
+                self.cfg["pomo_total_work_secs"]  = 0
+                self.cfg["pomo_total_break_secs"] = 0
+                save_config(self.cfg)
+                win.destroy(); self._open_pomo_settings()
+        tk.Button(inner, text="🗑 Reset statistics", command=_reset_stats,
+            bg=T["bg"], fg=T["muted"], relief="flat",
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),8),
+            padx=8, pady=3, cursor="hand2",
+            activebackground=T["item_hover"]).pack(pady=(0,10))
+
 
     def run(self):
         self.entry.focus_set(); self.root.mainloop()

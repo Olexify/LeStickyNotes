@@ -7,6 +7,12 @@ for fn in ('icon.png', 'icon.ico'):
     if os.path.exists(fn):
         datas.append((fn, '.'))
 
+# Bundle sounds folder
+if os.path.isdir('sounds'):
+    for f in os.listdir('sounds'):
+        if f.endswith('.wav'):
+            datas.append((os.path.join('sounds', f), 'sounds'))
+
 a = Analysis(
     ['sticky_notes.py'],
     pathex=[],
@@ -15,13 +21,13 @@ a = Analysis(
     hiddenimports=[
         'tkinter','tkinter.ttk','tkinter.filedialog',
         'tkinter.messagebox','tkinter.simpledialog','json','os','datetime',
-        'uuid','ctypes','sys','threading',
+        'uuid','ctypes','sys','threading','winsound',
         'pystray','PIL','PIL.Image',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['numpy','pandas','matplotlib','scipy'],
+    excludes=['numpy','pandas','matplotlib','scipy','pygame'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
