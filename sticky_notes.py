@@ -142,6 +142,11 @@ def load_tasks():
 def save_tasks(tasks):
     with open(TASKS_FILE,"w",encoding="utf-8") as f:
         json.dump(tasks, f, indent=2, ensure_ascii=False)
+    # Invalidate app-level task pool cache
+    if _app_instance:
+        _app_instance._tasks_cache = None
+
+_app_instance = None  # set in App.__init__
 
 # ── docs ──────────────────────────────────────────────────────────────────────
 def load_docs():
@@ -291,6 +296,8 @@ class App:
         self.cfg.setdefault("show_in_taskbar", False)
         self.tasks = load_tasks()
         self._purge_old_trash()
+        global _app_instance; _app_instance = self
+        self._tasks_cache = None
         self.current_tab   = "active"
         self.search_var    = None
         self._drag_x = self._drag_y = 0
@@ -565,6 +572,11 @@ class App:
             padx=4,pady=2,cursor="hand2",activebackground=self.T["btn_hover"]).pack(side="right")
         self._render_tasks()
         self.root.after(50, lambda: self._bind_ctrl_wheel_recursive(self.main))
+        # Bind scroll globally on canvas so it always works regardless of task_frame contents
+        for _seq in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            self.canvas.bind_all(_seq, self._scroll, add="+")
+        for _seq in ("<Control-MouseWheel>","<Control-Button-4>","<Control-Button-5>"):
+            self.canvas.bind_all(_seq, self._ctrl_scroll, add="+")
 
     def _bind_ctrl_wheel_recursive(self, widget):
         # Only bind on Frame/Label/Checkbutton – skip Entry/Text to avoid swallowing keys
@@ -772,32 +784,46 @@ class App:
         self._set_scale(self.cfg.get("ui_scale",1.0) + (0.05 if (getattr(e,"num",None)==4 or getattr(e,"delta",0)>0) else -0.05))
 
     # ── task pools ────────────────────────────────────────────────────────────
-    def _active_tasks(self):
+    def _build_task_cache(self):
+        """Single-pass split of self.tasks into pools. Cached until next save."""
         now = now_dt()
         today = datetime.date.today()
-        return [t for t in self.tasks
-            if not t.get("deleted") and not (
-                t.get("done") and t.get("completed_at") and
-                now - parse_iso(t["completed_at"]) > datetime.timedelta(days=1)
-            ) and not (
-                t.get("start_date") and
-                not t.get("done") and
-                datetime.date.fromisoformat(t["start_date"]) > today
-            )]
+        cutoff = now - datetime.timedelta(days=1)
+        active = []; scheduled = []; archived = []
+        for t in self.tasks:
+            if t.get("deleted"): continue
+            done = t.get("done", False)
+            if done:
+                ca = t.get("completed_at")
+                if ca:
+                    try:
+                        if parse_iso(ca) < cutoff:
+                            archived.append(t)
+                            continue
+                    except Exception:
+                        pass
+            sd = t.get("start_date")
+            if sd and not done:
+                try:
+                    if datetime.date.fromisoformat(sd) > today:
+                        scheduled.append(t)
+                        continue
+                except Exception:
+                    pass
+            active.append(t)
+        self._tasks_cache = {"active": active, "scheduled": scheduled, "archived": archived}
+
+    def _active_tasks(self):
+        if self._tasks_cache is None: self._build_task_cache()
+        return self._tasks_cache["active"]
 
     def _scheduled_tasks(self):
-        """Tasks with a future start_date that haven't started yet."""
-        today = datetime.date.today()
-        return [t for t in self.tasks
-            if not t.get("deleted") and not t.get("done") and
-               t.get("start_date") and
-               datetime.date.fromisoformat(t["start_date"]) > today]
+        if self._tasks_cache is None: self._build_task_cache()
+        return self._tasks_cache["scheduled"]
 
     def _archived_tasks(self):
-        now = now_dt()
-        return [t for t in self.tasks
-            if not t.get("deleted") and t.get("done") and t.get("completed_at") and
-               now - parse_iso(t["completed_at"]) > datetime.timedelta(days=1)]
+        if self._tasks_cache is None: self._build_task_cache()
+        return self._tasks_cache["archived"]
 
     def _search_pool(self):
         q = self.search_var.get().strip().lower()
@@ -814,6 +840,8 @@ class App:
     def _render_tasks(self):
         self._subtask_label_registry = {}
         self._subtask_check_registry = {}
+        # Detach task_frame from canvas while rebuilding to suppress per-widget redraws
+        self.task_frame.pack_propagate(False)
         for w in self.task_frame.winfo_children(): w.destroy()
         now_ts = datetime.datetime.now().timestamp()
         if now_ts - getattr(self,"_last_purge_ts",0) > 60:
@@ -859,13 +887,24 @@ class App:
         else:                             self._render_active(T)
 
         tk.Frame(self.task_frame, bg=T["bg"], height=60).pack(fill="x")
+        self.task_frame.pack_propagate(True)   # re-enable — triggers single repaint
         self._update_scroll()
         self._refresh_tabs()
-        self.root.after(50, lambda: self._bind_ctrl_wheel_recursive(self.task_frame))
-        open_count    = len([t for t in self.tasks if not t.get("deleted") and not t.get("done")])
-        archive_count = len(self._archived_tasks())
+        now_dt_ = now_dt()
+        _cutoff = now_dt_ - datetime.timedelta(days=1)
+        open_count = 0; archive_count = 0; trash_count = 0
+        for _t in self.tasks:
+            if _t.get("deleted"):
+                trash_count += 1
+            elif _t.get("done") and _t.get("completed_at"):
+                try:
+                    if parse_iso(_t["completed_at"]) < _cutoff:
+                        archive_count += 1
+                except Exception:
+                    pass
+            elif not _t.get("done"):
+                open_count += 1
         parts = [f"Tasks: {open_count}", f"Archive: {archive_count}"]
-        trash_count = len(self._trash_items())
         if trash_count: parts.append(f"Trash: {trash_count}")
         self.status_var.set(" · ".join(parts))
 
@@ -981,7 +1020,6 @@ class App:
                     self._task_row(task, archived=True)
             self._update_scroll()
             # rebind scroll on new widgets
-            self.root.after(30, lambda: self._bind_ctrl_wheel_recursive(self.task_frame))
 
         q_var.trace_add("write", _apply_filters)
         prio_var.trace_add("write", _apply_filters)
@@ -1402,7 +1440,6 @@ class App:
                 for task in filtered:
                     self._task_row(task, searching=True)
             self._update_scroll()
-            self.root.after(30, lambda: self._bind_ctrl_wheel_recursive(self.task_frame))
 
         def _pick_s_from():
             self._show_calendar_picker(s_from_btn, sd[0],
@@ -2083,7 +2120,7 @@ class App:
         self._doc_grid_T    = T
         def _debounce_grid(e, gh=grid_host):
             if hasattr(self,"_grid_job"): self.root.after_cancel(self._grid_job)
-            self._grid_job = self.root.after(80, lambda: self._relayout_doc_grid(gh.winfo_width() or 320))
+            self._grid_job = self.root.after(80, lambda: self._relayout_doc_grid(gh.winfo_width() if gh.winfo_exists() else 320))
         grid_host.bind("<Configure>", _debounce_grid)
         self.root.after(120, lambda: self._relayout_doc_grid(grid_host.winfo_width() or 320))
 
@@ -2591,8 +2628,9 @@ class App:
     # ── task row ──────────────────────────────────────────────────────────────
     def _task_row(self, task, archived=False, trashed=False, searching=False, scheduled=False):
         T = self.T
-        row = tk.Frame(self.task_frame,bg=T["item_bg"],pady=3,padx=4); row.pack(fill="x",pady=2)
-        row._task_ref = task
+        wrapper = tk.Frame(self.task_frame, bg=T["item_bg"]); wrapper.pack(fill="x", pady=2)
+        row = tk.Frame(wrapper, bg=T["item_bg"], pady=3, padx=4); row.pack(fill="x")
+        row._task_ref = task; wrapper._task_ref = task
         action_buttons = []
 
         def paint(bg):
@@ -2602,14 +2640,27 @@ class App:
             for b in action_buttons:
                 try: b.configure(bg=bg)
                 except Exception: pass
+            try: btn_overlay.configure(bg=bg)
+            except Exception: pass
             if drag_lbl: drag_lbl.configure(bg=bg)
 
+        def _bind_hover(widget):
+            widget.bind("<Enter>", lambda e: paint(T["item_hover"]), add="+")
+            widget.bind("<Leave>", lambda e: paint(T["item_bg"]), add="+")
         row.bind("<Enter>", lambda e: paint(T["item_hover"]))
         row.bind("<Leave>", lambda e: paint(T["item_bg"]))
 
         pri = task.get("priority","none")
         pri_color = T.get(pri, T["separator"]) if pri!="none" else T["separator"]
-        tk.Frame(row,bg=pri_color,width=5).pack(side="left",fill="y",padx=(0,4))
+        _pri_bar = tk.Frame(wrapper, bg=pri_color, width=5)
+        _pri_bar.place(x=0, y=4, width=5, height=10)  # real size set by _update_bar
+        # keep bar updated when wrapper resizes
+        def _update_bar(e, b=_pri_bar):
+            pad = 4
+            b.place(x=0, y=pad, width=5, height=max(4, e.height - pad*2))
+        wrapper.bind("<Configure>", _update_bar)
+        # offset row and date_row content so bar doesn't cover checkbox
+        row.pack_configure(padx=(9,4))
 
         drag_lbl = None
         if not archived and not trashed and not searching:
@@ -2630,18 +2681,22 @@ class App:
 
         style = ("Segoe UI Variable",10,"overstrike") if is_done else (self.cfg.get("ui_font","Segoe UI Variable"),10)
         fg    = T["muted"] if is_done else T["text"]
-        tw    = tk.Frame(row,bg=T["item_bg"]); tw.pack(side="left",fill="x",expand=True)
+        tw    = tk.Frame(row,bg=T["item_bg"])
+        # tw.pack() is deferred — called after action buttons claim side=right space
 
         # Feature 4: wraplength uses full available width dynamically
         def _make_lbl(tw=tw,task=task,style=style,fg=fg):
             lbl = tk.Label(tw,text=task["text"],bg=T["item_bg"],fg=fg,
                 font=style,anchor="w",justify="left",wraplength=1)
             lbl.pack(anchor="w",fill="x",expand=True)
-            def _update_wrap(e,l=lbl): l.configure(wraplength=max(60,e.width-4))
+            def _update_wrap(e,l=lbl): l.configure(wraplength=max(60,e.width-54))
             tw.bind("<Configure>", _update_wrap, add="+")
-            lbl.bind("<Configure>", lambda e,l=lbl,t=tw: l.configure(wraplength=max(60,t.winfo_width()-4)))
+            lbl.bind("<Configure>", lambda e,l=lbl,t=tw: l.configure(wraplength=max(60,t.winfo_width()-54)))
             return lbl
         lbl = _make_lbl()
+
+        _bind_hover(tw); _bind_hover(lbl); _bind_hover(chk); _bind_hover(wrapper)
+        # raise text content above action buttons so text overlaps buttons, not vice versa
 
         if not archived and not trashed and not searching:
             lbl.bind("<Double-Button-1>", lambda e,p=tw,l=lbl,t=task: self._inline_edit_task(p,l,t))
@@ -2661,8 +2716,10 @@ class App:
             sl = tk.Label(sf,text=st.get("text",""),bg=T["item_bg"],
                 fg=T["muted"] if st.get("done") else T["text"],
                 font=("Segoe UI Variable",8,"overstrike" if st.get("done") else "normal"),
-                anchor="w",justify="left")
+                anchor="w",justify="left",wraplength=1)
             sl.pack(side="left",anchor="w",fill="x",expand=True)
+            def _upd_sub_wrap(e, l=sl): l.configure(wraplength=max(40, e.width-54))
+            sf.bind("<Configure>", _upd_sub_wrap, add="+")
             self._subtask_label_registry[id(st)] = sl  # track for in-place update
             if not archived and not trashed and not searching:
                 sl.bind("<Double-Button-1>", lambda e,parent=sf,lab=sl,ta=task,sub=st: self._inline_edit_subtask(parent,lab,ta,sub))
@@ -2697,7 +2754,8 @@ class App:
 
         if not archived and not trashed and not searching:
             # Combined row: created text (if no dates set) + start/due buttons
-            date_row = tk.Frame(tw, bg=T["item_bg"]); date_row.pack(anchor="w", fill="x")
+            date_row = tk.Frame(wrapper, bg=T["item_bg"])
+            date_row.pack(fill="x", padx=(28,0))  # indent to align with text content
 
             if _show_created:
                 if is_done and task.get("completed_at"):
@@ -2705,7 +2763,6 @@ class App:
                 else:
                     _wday = _WDAY[dt.weekday()] if dt else ""
                     meta_txt = f"{_wday} {fmt_dt(dt)}" if dt else ""
-                if pri!="none": meta_txt += f" · {pri.capitalize()}"
                 if trashed and task.get("deleted_at"):
                     remain = max(0, int((datetime.timedelta(hours=TRASH_HOURS)-(now_dt()-parse_iso(task["deleted_at"]))).total_seconds()//3600))
                     meta_txt += f" · ~{remain}h left"
@@ -2758,14 +2815,9 @@ class App:
                 padx=2, pady=0, cursor="hand2", activebackground=T["item_hover"])
             dd_btn.pack(side="left")
 
-            if pri!="none" or trashed:
-                pri_lbl_txt = f" · {pri.capitalize()}" if pri!="none" else ""
-                if trashed and task.get("deleted_at"):
-                    remain = max(0, int((datetime.timedelta(hours=TRASH_HOURS)-(now_dt()-parse_iso(task["deleted_at"]))).total_seconds()//3600))
-                    pri_lbl_txt += f" · ~{remain}h left"
-                if pri_lbl_txt:
-                    tk.Label(date_row, text=pri_lbl_txt, bg=T["item_bg"], fg=meta_fg,
-                        font=fn8).pack(side="left", padx=(2,0))
+            if pri != "none":
+                tk.Label(date_row, text=f"· {pri.capitalize()}", bg=T["item_bg"],
+                    fg=meta_fg, font=fn8).pack(side="left", padx=(6,0))
 
             def _pick_start(t=task, b=sd_btn):
                 init = _dtm.date.fromisoformat(t["start_date"]) if t.get("start_date") else None
@@ -2800,18 +2852,30 @@ class App:
             sd_btn.configure(command=_pick_start)
             dd_btn.configure(command=_pick_due)
 
-        _paint_widgets = [row,tw,lbl,meta] + ([date_row] if date_row else [])
+        _paint_widgets = [wrapper,row,tw,lbl,meta] + ([date_row] if date_row else [])
 
-        def mk_btn(txt, cmd_fn):
-            b = tk.Button(row,text=txt,command=cmd_fn,bg=T["item_bg"],fg=T["text"],
-                relief="flat",bd=0,padx=4,pady=0,
-                font=(self.cfg.get("ui_font","Segoe UI Variable"),9),
-                cursor="hand2",activebackground=T["item_hover"])
-            b.pack(side="right"); action_buttons.append(b); return b
+        # tw fills the full row width; btn_overlay floats via place() — zero impact on layout
+        tw.pack(side="left", fill="both", expand=True)
+
+        btn_overlay = tk.Frame(wrapper, bg=T["item_bg"])
+        _OVERLAY_SZ = 48  # fixed square size — 2×2 grid of bigger, easy-to-click buttons
+        _BIN = "x"        # small ASCII stand-in so emoji doesn't get clipped
+
+        def mk_btn(txt, cmd_fn, r, c):
+            b = tk.Button(btn_overlay, text=txt, command=cmd_fn, bg=T["item_bg"], fg=T["text"],
+                relief="flat", bd=0, padx=0, pady=0, width=2,
+                font=(self.cfg.get("ui_font","Segoe UI Variable"), 8),
+                cursor="hand2", activebackground=T["item_hover"])
+            b.grid(row=r, column=c, sticky="nsew", padx=1, pady=1)
+            action_buttons.append(b); return b
+
+        btn_overlay.grid_columnconfigure(0, weight=1, uniform="bq")
+        btn_overlay.grid_columnconfigure(1, weight=1, uniform="bq")
+        btn_overlay.grid_rowconfigure(0, weight=1, uniform="bq")
+        btn_overlay.grid_rowconfigure(1, weight=1, uniform="bq")
 
         if trashed:
-            mk_btn("↺", lambda t=task: self._recover_task(t))
-            # double-confirm delete
+            mk_btn("↺", lambda t=task: self._recover_task(t), 0, 0)
             _del_btn_ref = [None]
             def _confirm_del_task(btn_r=_del_btn_ref, t=task):
                 b = btn_r[0]
@@ -2819,20 +2883,34 @@ class App:
                 if getattr(b,"_confirm",False):
                     self._delete_forever(t)
                 else:
-                    b._confirm = True; b.configure(text="Sure?",fg=self.T["close_hover"])
+                    b._confirm = True; b.configure(text="?", fg=self.T["close_hover"])
                     b.after(2000, lambda: (setattr(b,"_confirm",False),
                         b.configure(text="🗑",fg=self.T["text"])) if b.winfo_exists() else None)
-            _del_b = mk_btn("🗑", _confirm_del_task)
+            _del_b = mk_btn("🗑", _confirm_del_task, 0, 1)
             if _del_b: _del_b._confirm=False; _del_btn_ref[0]=_del_b
         elif archived:
-            # Feature 3: unsolve + delete in archive
-            mk_btn("↩ Unsolve", lambda t=task: self._unsolve_task(t))
-            mk_btn("🗑",        lambda t=task: self._trash_task(t))
+            mk_btn("↩", lambda t=task: self._unsolve_task(t), 0, 0)
+            mk_btn("🗑", lambda t=task: self._trash_task(t),   0, 1)
         elif not searching:
-            mk_btn("🗑", lambda t=task: self._trash_task(t))
-            mk_btn("⊞", lambda t=task: self._add_subtask(t))
-            mk_btn("!", lambda t=task: self._cycle_priority(t))
-            mk_btn("✎", lambda t=task,p=tw,l=lbl: self._inline_edit_task(p,l,t))
+            # 2×2 grid: [✎  !]
+            #           [⊞  🗑]
+            mk_btn("✎", lambda t=task,p=tw,l=lbl: self._inline_edit_task(p,l,t), 0, 0)
+            mk_btn("!",  lambda t=task: self._cycle_priority(t),                  0, 1)
+            mk_btn("⊞",  lambda t=task: self._add_subtask(t),                    1, 0)
+            mk_btn("🗑",  lambda t=task: self._trash_task(t),                     1, 1)
+
+        # Place overlay anchored to top-right of wrapper (not row) so it is never clipped
+        def _place_overlay(e=None, bo=btn_overlay, w=wrapper, sz=_OVERLAY_SZ):
+            try:
+                if not bo.winfo_exists() or not w.winfo_exists(): return
+                wh = w.winfo_height()
+                if wh < 2: wh = w.winfo_reqheight()
+                y_off = max(0, (wh - sz) // 2)
+                bo.place(relx=1.0, x=-sz-2, y=y_off, width=sz, height=sz)
+            except Exception: pass
+        wrapper.bind("<Configure>", _place_overlay, add="+")
+        btn_overlay.after(60, _place_overlay)
+
 
     # ── drag-drop ─────────────────────────────────────────────────────────────
     def _dt_start(self, t): self._dragging_task = t
@@ -2874,10 +2952,18 @@ class App:
                 if _finished[0]: return
                 _finished[0] = True
                 new = entry.get("1.0","end-1c").strip()
+                changed = save and new and new != task.get("text","")
                 try: ef.destroy()
                 except Exception: pass
-                if save and new: task["text"]=new; save_tasks(self.tasks)
-                self._render_tasks()
+                if changed:
+                    task["text"] = new
+                    save_tasks(self.tasks)
+                    np = self.cfg.get("obsidian_note_path","").strip()
+                    if np: sync_note(np, task)
+                    self._render_tasks()
+                else:
+                    # nothing changed — restore label in-place, no full re-render
+                    label.pack(anchor="w", fill="x", expand=True)
             entry.bind("<Escape>",      lambda e: finish(False))
             entry.bind("<Control-Return>", lambda e: finish(True))
             # Feature 7: click outside submits
@@ -2895,12 +2981,18 @@ class App:
                 if _finished[0]: return
                 _finished[0] = True
                 new = entry.get().strip()
+                changed = save and new and new != task.get("text","")
                 try: entry.destroy()
                 except Exception: pass
-                if save and new: task["text"]=new; save_tasks(self.tasks)
-                np = self.cfg.get("obsidian_note_path","").strip()
-                if np and save and new: sync_note(np,task)
-                self._render_tasks()
+                if changed:
+                    task["text"] = new
+                    save_tasks(self.tasks)
+                    np = self.cfg.get("obsidian_note_path","").strip()
+                    if np: sync_note(np, task)
+                    self._render_tasks()
+                else:
+                    # nothing changed — restore label in-place, no full re-render
+                    label.pack(anchor="w", fill="x", expand=True)
             entry.bind("<Return>",   lambda e: finish(True))
             entry.bind("<Escape>",   lambda e: finish(False))
             # Feature 7: click outside submits
