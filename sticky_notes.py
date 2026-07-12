@@ -840,6 +840,7 @@ class App:
     def _render_tasks(self):
         self._subtask_label_registry = {}
         self._subtask_check_registry = {}
+        self._task_widget_registry = {}  # id(task) -> {lbl, pri_bar, tw, date_row, pri_lbl}
         # Detach task_frame from canvas while rebuilding to suppress per-widget redraws
         self.task_frame.pack_propagate(False)
         for w in self.task_frame.winfo_children(): w.destroy()
@@ -2704,27 +2705,7 @@ class App:
             row.bind("<Double-Button-1>", lambda e,p=tw,l=lbl,t=task: self._body_dblclick(e,p,l,t))
 
         for st in task.get("subtasks",[]):
-            sf = tk.Frame(tw,bg=T["item_bg"]); sf.pack(anchor="w",fill="x")
-            sv = tk.BooleanVar(value=st.get("done",False))
-            sc = tk.Checkbutton(sf,variable=sv,bg=T["item_bg"],activebackground=T["item_bg"],
-                selectcolor=T["check_done"] if st.get("done") else T["item_bg"],
-                relief="flat",bd=0,highlightthickness=0,
-                state="disabled" if (archived or trashed or searching) else "normal",
-                command=lambda sv=sv,sub=st,ta=task: self._toggle_subtask(ta,sub,sv))
-            sc.pack(side="left")
-            self._subtask_check_registry[id(st)] = sc
-            sl = tk.Label(sf,text=st.get("text",""),bg=T["item_bg"],
-                fg=T["muted"] if st.get("done") else T["text"],
-                font=("Segoe UI Variable",8,"overstrike" if st.get("done") else "normal"),
-                anchor="w",justify="left",wraplength=1)
-            sl.pack(side="left",anchor="w",fill="x",expand=True)
-            def _upd_sub_wrap(e, l=sl): l.configure(wraplength=max(40, e.width-54))
-            sf.bind("<Configure>", _upd_sub_wrap, add="+")
-            self._subtask_label_registry[id(st)] = sl  # track for in-place update
-            if not archived and not trashed and not searching:
-                sl.bind("<Double-Button-1>", lambda e,parent=sf,lab=sl,ta=task,sub=st: self._inline_edit_subtask(parent,lab,ta,sub))
-            if st.get("_editing") and not archived and not trashed and not searching:
-                self.root.after(10, lambda parent=sf,lab=sl,ta=task,sub=st: self._inline_edit_subtask(parent,lab,ta,sub))
+            self._inject_subtask_row(tw, task, st, archived=archived, trashed=trashed, searching=searching)
 
         import datetime as _dtm
         _WDAY = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
@@ -2816,8 +2797,11 @@ class App:
             dd_btn.pack(side="left")
 
             if pri != "none":
-                tk.Label(date_row, text=f"· {pri.capitalize()}", bg=T["item_bg"],
-                    fg=meta_fg, font=fn8).pack(side="left", padx=(6,0))
+                _pri_lbl_w = tk.Label(date_row, text=f"· {pri.capitalize()}", bg=T["item_bg"],
+                    fg=meta_fg, font=fn8)
+                _pri_lbl_w.pack(side="left", padx=(6,0))
+                if hasattr(self, "_task_widget_registry") and id(task) in self._task_widget_registry:
+                    self._task_widget_registry[id(task)]["pri_lbl"] = _pri_lbl_w
 
             def _pick_start(t=task, b=sd_btn):
                 init = _dtm.date.fromisoformat(t["start_date"]) if t.get("start_date") else None
@@ -2853,6 +2837,11 @@ class App:
             dd_btn.configure(command=_pick_due)
 
         _paint_widgets = [wrapper,row,tw,lbl,meta] + ([date_row] if date_row else [])
+        # Register task widgets for in-place updates (priority, rename, subtask add)
+        _reg = {"lbl": lbl, "pri_bar": _pri_bar, "tw": tw,
+                "date_row": date_row, "pri_lbl": None, "wrapper": wrapper}
+        if hasattr(self, "_task_widget_registry"):
+            self._task_widget_registry[id(task)] = _reg
 
         # tw fills the full row width; btn_overlay floats via place() — zero impact on layout
         tw.pack(side="left", fill="both", expand=True)
@@ -2960,10 +2949,15 @@ class App:
                     save_tasks(self.tasks)
                     np = self.cfg.get("obsidian_note_path","").strip()
                     if np: sync_note(np, task)
-                    self._render_tasks()
-                else:
-                    # nothing changed — restore label in-place, no full re-render
-                    label.pack(anchor="w", fill="x", expand=True)
+                    # Update label in-place — no full re-render
+                    reg = getattr(self, "_task_widget_registry", {}).get(id(task))
+                    if reg and reg.get("lbl") and reg["lbl"].winfo_exists():
+                        reg["lbl"].configure(text=new)
+                        label.pack(anchor="w", fill="x", expand=True)
+                    else:
+                        self._render_tasks(); return
+                # restore label whether changed or not
+                label.pack(anchor="w", fill="x", expand=True)
             entry.bind("<Escape>",      lambda e: finish(False))
             entry.bind("<Control-Return>", lambda e: finish(True))
             # Feature 7: click outside submits
@@ -2989,10 +2983,13 @@ class App:
                     save_tasks(self.tasks)
                     np = self.cfg.get("obsidian_note_path","").strip()
                     if np: sync_note(np, task)
-                    self._render_tasks()
-                else:
-                    # nothing changed — restore label in-place, no full re-render
-                    label.pack(anchor="w", fill="x", expand=True)
+                    # Update label in-place — no full re-render
+                    reg = getattr(self, "_task_widget_registry", {}).get(id(task))
+                    if reg and reg.get("lbl") and reg["lbl"].winfo_exists():
+                        reg["lbl"].configure(text=new)
+                    else:
+                        self._render_tasks(); return
+                label.pack(anchor="w", fill="x", expand=True)
             entry.bind("<Return>",   lambda e: finish(True))
             entry.bind("<Escape>",   lambda e: finish(False))
             # Feature 7: click outside submits
@@ -3048,14 +3045,49 @@ class App:
         self.current_tab = "active"; self._render_tasks()
 
     # ── subtask ───────────────────────────────────────────────────────────────
+    def _inject_subtask_row(self, tw, task, st, archived=False, trashed=False, searching=False):
+        """Build one subtask row widget into tw without a full re-render."""
+        T = self.T
+        sf = tk.Frame(tw, bg=T["item_bg"]); sf.pack(anchor="w", fill="x")
+        sv = tk.BooleanVar(value=st.get("done", False))
+        sc = tk.Checkbutton(sf, variable=sv, bg=T["item_bg"], activebackground=T["item_bg"],
+            selectcolor=T["check_done"] if st.get("done") else T["item_bg"],
+            relief="flat", bd=0, highlightthickness=0,
+            state="disabled" if (archived or trashed or searching) else "normal",
+            command=lambda sv=sv, sub=st, ta=task: self._toggle_subtask(ta, sub, sv))
+        sc.pack(side="left")
+        self._subtask_check_registry[id(st)] = sc
+        sl = tk.Label(sf, text=st.get("text",""), bg=T["item_bg"],
+            fg=T["muted"] if st.get("done") else T["text"],
+            font=(self.cfg.get("ui_font","Segoe UI Variable"), 8,
+                  "overstrike" if st.get("done") else "normal"),
+            anchor="w", justify="left", wraplength=1)
+        sl.pack(side="left", anchor="w", fill="x", expand=True)
+        def _upd_sub_wrap(e, l=sl): l.configure(wraplength=max(40, e.width-54))
+        sf.bind("<Configure>", _upd_sub_wrap, add="+")
+        self._subtask_label_registry[id(st)] = sl
+        if not archived and not trashed and not searching:
+            sl.bind("<Double-Button-1>",
+                lambda e, parent=sf, lab=sl, ta=task, sub=st:
+                    self._inline_edit_subtask(parent, lab, ta, sub))
+        if st.get("_editing"):
+            self.root.after(10, lambda: self._inline_edit_subtask(sf, sl, task, st))
+        return sf
+
     def _add_subtask(self, task):
         # flush any open subtask entry for THIS task before adding a new one
         self._flush_editing_subtasks(task)
-        task.setdefault("subtasks",[]).append({"id":str(uuid.uuid4()),"text":"","done":False,"_editing":True})
+        new_sub = {"id": str(uuid.uuid4()), "text": "", "done": False, "_editing": True}
+        task.setdefault("subtasks", []).append(new_sub)
         save_tasks(self.tasks)
         np = self.cfg.get("obsidian_note_path","").strip()
-        if np: sync_note(np,task)
-        self._render_tasks()
+        if np: sync_note(np, task)
+        # Inject subtask row in-place if we have the tw widget
+        reg = getattr(self, "_task_widget_registry", {}).get(id(task))
+        if reg and reg.get("tw") and reg["tw"].winfo_exists():
+            self._inject_subtask_row(reg["tw"], task, new_sub)
+        else:
+            self._render_tasks()
 
     def _flush_editing_subtasks(self, task):
         """Commit text from any currently open subtask Entry widget belonging to task."""
@@ -3107,7 +3139,36 @@ class App:
     def _cycle_priority(self, task):
         cur = task.get("priority","none")
         task["priority"] = PRIORITIES[(PRIORITIES.index(cur)+1) % len(PRIORITIES)]
-        save_tasks(self.tasks); self._render_tasks()
+        save_tasks(self.tasks)
+        T = self.T
+        reg = getattr(self, "_task_widget_registry", {}).get(id(task))
+        if not reg:
+            self._render_tasks(); return
+        pri = task["priority"]
+        pri_color = T.get(pri, T["separator"]) if pri != "none" else T["separator"]
+        # Update left colour bar
+        try: reg["pri_bar"].configure(bg=pri_color)
+        except Exception: pass
+        # Update or create/remove the priority text label in date_row
+        try:
+            dr = reg.get("date_row")
+            pl = reg.get("pri_lbl")
+            meta_fg = T["muted"]
+            fn8 = (self.cfg.get("ui_font","Segoe UI Variable"), 8)
+            if pri != "none":
+                if pl and pl.winfo_exists():
+                    pl.configure(text=f"· {pri.capitalize()}")
+                elif dr and dr.winfo_exists():
+                    pl = tk.Label(dr, text=f"· {pri.capitalize()}", bg=T["item_bg"],
+                                  fg=meta_fg, font=fn8)
+                    pl.pack(side="left", padx=(6,0))
+                    reg["pri_lbl"] = pl
+            else:
+                if pl and pl.winfo_exists():
+                    pl.destroy()
+                    reg["pri_lbl"] = None
+        except Exception:
+            self._render_tasks()
 
     # ── Feature 1: toggle moves solved task to correct section ───────────────
     def _toggle(self, task, var):
