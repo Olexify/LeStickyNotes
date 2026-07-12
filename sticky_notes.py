@@ -402,6 +402,21 @@ class App:
         self._apply_scale()
         self._retheme_main_only()
 
+    def _set_scale_debounced(self, s):
+        """Update scale value immediately for display, but defer the expensive
+        _apply_scale + _retheme until the user stops scrolling/sliding (150ms idle)."""
+        self.cfg["ui_scale"] = round(max(0.5, min(3.0, float(s))), 2)
+        if hasattr(self, "_scale_job") and self._scale_job:
+            try: self.root.after_cancel(self._scale_job)
+            except Exception: pass
+        self._scale_job = self.root.after(150, self._flush_scale)
+
+    def _flush_scale(self):
+        self._scale_job = None
+        save_config(self.cfg)
+        self._apply_scale()
+        self._retheme_main_only()
+
     # ── chrome ────────────────────────────────────────────────────────────────
     def _custom_chrome_on(self):
         return not bool(self.cfg.get("show_system_titlebar",False)) and not bool(self.cfg.get("show_in_taskbar",False))
@@ -781,7 +796,7 @@ class App:
         if top<0: self.canvas.yview_moveto(0.0)
         return "break"
     def _ctrl_scroll(self, e):
-        self._set_scale(self.cfg.get("ui_scale",1.0) + (0.05 if (getattr(e,"num",None)==4 or getattr(e,"delta",0)>0) else -0.05))
+        self._set_scale_debounced(self.cfg.get("ui_scale",1.0) + (0.05 if (getattr(e,"num",None)==4 or getattr(e,"delta",0)>0) else -0.05))
 
     # ── task pools ────────────────────────────────────────────────────────────
     def _build_task_cache(self):
@@ -1186,6 +1201,54 @@ class App:
         del_doc_btn.pack(side="right")
 
 
+    # ── habit drag-reorder ───────────────────────────────────────────────────
+    def _habit_drag_start(self, e, idx, habits_list, data):
+        self._drag_habit_idx   = idx
+        self._drag_habit_start = e.y_root
+        self._drag_habit_moved = False
+        self._drag_habit_list  = habits_list
+        self._drag_habit_data  = data
+        # Grab motion/release globally so drag works outside the handle widget
+        self.root.bind("<B1-Motion>",       self._habit_drag_motion,   add="+")
+        self.root.bind("<ButtonRelease-1>", self._habit_drag_end_root, add="+")
+
+    def _habit_drag_motion(self, e):
+        if not hasattr(self, "_drag_habit_idx") or self._drag_habit_idx is None: return
+        if abs(e.y_root - self._drag_habit_start) > 6:
+            self._drag_habit_moved = True
+
+    def _habit_drag_end_root(self, e):
+        self.root.unbind("<B1-Motion>")
+        self.root.unbind("<ButtonRelease-1>")
+        if not hasattr(self, "_drag_habit_idx") or self._drag_habit_idx is None: return
+        if not getattr(self, "_drag_habit_moved", False):
+            self._drag_habit_idx = None; return
+        src          = self._drag_habit_idx
+        habits_list  = self._drag_habit_list
+        data         = self._drag_habit_data
+        self._drag_habit_idx = None; self._drag_habit_moved = False
+        # find which habit card the pointer is over
+        target = None
+        for child in self.task_frame.winfo_children():
+            if not hasattr(child, "_habit_idx"): continue
+            cy = child.winfo_rooty()
+            if cy <= e.y_root <= cy + child.winfo_height():
+                target = child._habit_idx; break
+        if target is None or target == src: return
+        if src < len(habits_list) and target < len(habits_list):
+            moved_id  = habits_list[src]["id"]
+            target_id = habits_list[target]["id"]
+            all_habits = data.get("habits", [])
+            src_full = next((i for i,h in enumerate(all_habits) if h["id"]==moved_id), None)
+            tgt_full = next((i for i,h in enumerate(all_habits) if h["id"]==target_id), None)
+            if src_full is not None and tgt_full is not None:
+                all_habits.insert(tgt_full, all_habits.pop(src_full))
+                save_habits(data)
+                self._render_tasks()
+
+    def _habit_drag_end(self, e, habits_list, data):
+        pass  # kept for compat; real logic in _habit_drag_end_root
+
     # ── doc drag-reorder ──────────────────────────────────────────────────────
     def _doc_drag_start(self, e, idx):
         self._drag_doc_idx  = idx
@@ -1345,24 +1408,42 @@ class App:
             wx, wy = 100, 100
         win.geometry(f"+{wx}+{wy}")
         win.focus_set()
-        def _on_focus_out(e):
-            if not win.winfo_exists(): return
-            # Only close if focus went to a widget outside this window
-            fw = win.focus_get()
-            if fw is None or str(fw) == str(win) or str(fw).startswith(str(win) + "."):
-                return
-            try:
-                # check if focused widget is a descendant of win
-                w = fw
-                while w:
-                    if str(w) == str(win): return
-                    w = getattr(w, 'master', None)
-            except Exception:
-                pass
-            win.destroy()
-        win.bind("<FocusOut>", _on_focus_out)
         win.bind("<Escape>", lambda e: win.destroy())
 
+        # Close when user clicks anywhere outside this popup
+        def _global_click(e, w=win):
+            if not w.winfo_exists(): return
+            # check if click landed inside the popup window
+            wx0, wy0 = w.winfo_rootx(), w.winfo_rooty()
+            wx1, wy1 = wx0 + w.winfo_width(), wy0 + w.winfo_height()
+            if wx0 <= e.x_root <= wx1 and wy0 <= e.y_root <= wy1:
+                return  # click inside popup — ignore
+            try: w.destroy()
+            except Exception: pass
+            try: self.root.unbind("<Button-1>", _click_id[0])
+            except Exception: pass
+
+        # Destroy any previously open calendar
+        prev = getattr(self, "_open_calendar", None)
+        if prev:
+            try: prev.destroy()
+            except Exception: pass
+        self._open_calendar = win
+
+        _click_id = [None]
+        _click_id[0] = self.root.bind("<Button-1>", _global_click, add="+")
+        win.bind("<Destroy>", lambda e: self._clear_calendar_bind(_click_id[0]))
+
+
+    def _clear_calendar_bind(self, bid):
+        try: self.root.unbind("<Button-1>", bid)
+        except Exception: pass
+        if getattr(self, "_open_calendar", None):
+            try:
+                if not self._open_calendar.winfo_exists():
+                    self._open_calendar = None
+            except Exception:
+                self._open_calendar = None
 
     def _render_search(self, T):
         import datetime as _dt
@@ -2082,8 +2163,10 @@ class App:
         se.pack(side="left",fill="x",expand=True,ipady=4)
         ph_shown = [True]
         def _show_ph():
+            if not se.winfo_exists(): return
             if not doc_search_var.get(): se.insert(0,"🔍 Search docs…"); ph_shown[0]=True
         def _hide_ph(e):
+            if not se.winfo_exists(): return
             if ph_shown[0]: se.delete(0,"end"); ph_shown[0]=False
 
         def _apply_filter(docs_list, q):
@@ -2123,7 +2206,7 @@ class App:
             if hasattr(self,"_grid_job"): self.root.after_cancel(self._grid_job)
             self._grid_job = self.root.after(80, lambda: self._relayout_doc_grid(gh.winfo_width() if gh.winfo_exists() else 320))
         grid_host.bind("<Configure>", _debounce_grid)
-        self.root.after(120, lambda: self._relayout_doc_grid(grid_host.winfo_width() or 320))
+        self.root.after(120, lambda: self._relayout_doc_grid(grid_host.winfo_width() if grid_host.winfo_exists() else 320))
 
     def _relayout_doc_grid(self, total_w):
         if not hasattr(self,"_doc_grid_host") or not self._doc_grid_host.winfo_exists(): return
@@ -2152,7 +2235,7 @@ class App:
             cat_tag = doc.get("category","Default") or "Default"
             tl = tk.Label(cell,text=title_txt,bg=T["item_bg"],fg=T["text"],
                 font=(self.cfg.get("ui_font","Segoe UI Variable"),9,"bold"),
-                anchor="nw",wraplength=cell_w-8,justify="left",padx=4,pady=3)
+                anchor="nw",wraplength=max(40, cell_w-20),justify="left",padx=4,pady=3)
             tl.grid(row=0,column=0,sticky="ew",padx=0,pady=0)
             cl = tk.Label(cell,text=f"📂 {cat_tag}",bg=T["item_bg"],fg=T["archive"],
                 font=(self.cfg.get("ui_font","Segoe UI Variable"),7),
@@ -2180,15 +2263,16 @@ class App:
             tl.bind("<Double-Button-1>", lambda e,d=doc: self._open_doc(d))
             for w in (cell,pl,cl):
                 w.bind("<Double-Button-1>", lambda e,d=doc: self._open_doc(d))
-            def _enter(e,ww=(cell,tl,pl,cl,del_btn)):
+            def _enter(e, ww=(cell,tl,pl,cl,del_btn)):
                 for w in ww[:4]: w.configure(bg=T["item_hover"])
-                ww[4].configure(bg=T["item_hover"],fg=T["text"])
-            def _leave(e,ww=(cell,tl,pl,cl,del_btn)):
+                ww[4].configure(bg=T["item_hover"], fg=T["text"])
+            def _leave(e, ww=(cell,tl,pl,cl,del_btn)):
                 for w in ww[:4]: w.configure(bg=T["item_bg"])
-                ww[4].configure(bg=T["item_bg"],fg=T["muted"])
+                ww[4].configure(bg=T["item_bg"], fg=T["muted"])
             for w in (cell,tl,pl,cl):
                 w.bind("<Enter>",_enter); w.bind("<Leave>",_leave)
-            # drag to reorder
+            # Invisible drag zone — whole card is draggable, cursor shows it
+            cell.configure(cursor="fleur")
             for w in (cell,tl,pl,cl):
                 w.bind("<ButtonPress-1>",   lambda e,i=i: self._doc_drag_start(e,i))
                 w.bind("<B1-Motion>",       self._doc_drag_motion)
@@ -2418,10 +2502,16 @@ class App:
             bg=T["item_bg"],fg=T["text"],
             font=(self.cfg.get("ui_font","Segoe UI Variable"),9,"bold")).pack(anchor="w")
         bar_bg = tk.Frame(summary,bg=T["separator"],height=5); bar_bg.pack(fill="x",pady=(3,0))
-        def _draw_today_bar(bh=bar_bg,p=pct_today,col=T["check_done"]):
-            bw=bh.winfo_width() or 200
-            tk.Frame(bh,bg=col,height=5,width=max(0,int(bw*p))).place(x=0,y=0)
-        bar_bg.after(20,_draw_today_bar)
+        _bar_drawn = [False]
+        def _draw_today_bar(e=None, bh=bar_bg, p=pct_today, col=T["check_done"]):
+            if not bh.winfo_exists(): return
+            bw = bh.winfo_width()
+            if bw < 4: bw = 200
+            for w in bh.winfo_children(): w.destroy()
+            if p > 0:
+                tk.Frame(bh, bg=col, height=5, width=max(1, int(bw*p))).place(x=0, y=0)
+        bar_bg.bind("<Configure>", _draw_today_bar)
+        bar_bg.after(50, _draw_today_bar)
 
         for h in habits:
             hid        = h["id"]
@@ -2435,10 +2525,20 @@ class App:
             dots_7 = "".join("●" if _habit_done_on(hid,log,i) else "○" for i in range(6,-1,-1))
 
             card = tk.Frame(self.task_frame,bg=T["item_bg"],pady=5,padx=8)
+            card._habit_idx = habits.index(h)
             card.pack(fill="x",pady=2)
 
-            # top row: flame+streak, name, done-btn, delete-btn
+            # top row: drag-handle, flame+streak, name, done-btn, delete-btn
             top = tk.Frame(card,bg=T["item_bg"]); top.pack(fill="x")
+
+            # tiny ⋮⋮ drag handle
+            _hi = habits.index(h)
+            drag_h = tk.Label(top, text="⋮⋮", bg=T["item_bg"], fg=T["muted"],
+                font=(self.cfg.get("ui_font","Segoe UI Variable"), 8),
+                cursor="fleur", padx=2, pady=0)
+            drag_h.pack(side="left", padx=(0,2))
+            drag_h.bind("<ButtonPress-1>", lambda e,i=_hi,hl=habits,d=data: self._habit_drag_start(e,i,hl,d))
+
             flame = "🔥" if streak>0 else "○"
             tk.Label(top,text=f"{flame} {streak}d",bg=T["item_bg"],
                 fg=T["check_done"] if streak>0 else T["muted"],
@@ -3401,7 +3501,7 @@ class App:
             sc=tk.Scale(p,variable=scale_var,from_=0.5,to=3.0,resolution=0.05,orient="horizontal",
                 bg=self.T["bg"],fg=self.T["text"],troughcolor=self.T["separator"],
                 activebackground=self.T["btn_hover"],highlightthickness=0,bd=0,length=220,
-                command=lambda v:(self._set_scale(float(v)),self.root.after(10,self._keep_settings_alive)))
+                command=lambda v:(self._set_scale_debounced(float(v)),self.root.after(10,self._keep_settings_alive)))
             sc.pack(side="left")
             lb=tk.Label(p,textvariable=scale_var,bg=self.T["bg"],fg=self.T["text"],
                 font=(self.cfg.get("ui_font","Segoe UI Variable"),9),width=5)
