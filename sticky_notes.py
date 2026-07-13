@@ -20,12 +20,15 @@ except Exception:
 CONFIG_FILE  = os.path.join(os.path.expanduser("~"), ".leonote_config.json")
 TASKS_FILE   = os.path.join(os.path.expanduser("~"), ".leonote_tasks.json")
 DOCS_FILE    = os.path.join(os.path.expanduser("~"), ".leonote_docs.json")
-HABITS_FILE  = os.path.join(os.path.expanduser("~"), ".leonote_habits.json")
+HABITS_FILE      = os.path.join(os.path.expanduser("~"), ".leonote_habits.json")
+PRIORITIES_FILE  = os.path.join(os.path.expanduser("~"), ".leonote_priorities.json")
 
 DEFAULT_CONFIG = {
     "obsidian_note_path": "",
     "docs_backup_path": "",
     "always_on_top": True,
+    "focus_view": "list",
+    "use_priorities_tab": True,
     "window_x": 100, "window_y": 100,
     "window_w": 380, "window_h": 600,
     "theme": "peach",
@@ -172,6 +175,17 @@ def save_habits(data):
     with open(HABITS_FILE,"w",encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+def load_priorities():
+    if os.path.exists(PRIORITIES_FILE):
+        try:
+            with open(PRIORITIES_FILE,"r",encoding="utf-8") as f: return json.load(f)
+        except Exception: pass
+    return []
+
+def save_priorities(items):
+    with open(PRIORITIES_FILE,"w",encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
 def _habit_streak(habit_id, log):
     """Return streak; forgiving = 1 missed day allowed."""
     today = datetime.date.today()
@@ -298,7 +312,7 @@ class App:
         self._purge_old_trash()
         global _app_instance; _app_instance = self
         self._tasks_cache = None
-        self.current_tab   = "active"
+        self.current_tab   = "priorities" if self.cfg.get("use_priorities_tab", True) else "active"
         self.search_var    = None
         self._drag_x = self._drag_y = 0
         self._restore_geo  = None
@@ -318,6 +332,7 @@ class App:
         self.cfg.setdefault("pomo_break_mins", 3)
         self.cfg.setdefault("pomo_tick_volume", 0.15)
         self.cfg.setdefault("pomo_tick_enabled", True)
+        self.cfg.setdefault("pomo_no_tick_break", True)
         self.cfg.setdefault("pomo_alert_enabled", True)
         self.cfg.setdefault("pomo_alert_volume", 0.8)
         self.cfg.setdefault("pomo_work_color", "#e05c5c")
@@ -496,7 +511,11 @@ class App:
 
         tabs_row = tk.Frame(self.main, bg=self.T["tab_bg"]); tabs_row.pack(fill="x")
         self._tab_tasks   = self._mktab(tabs_row,"Tasks",   lambda:self._set_tab("active"))
-        self._tab_archive = self._mktab(tabs_row,"Archive", lambda:self._set_tab("archive"))
+        self._tab_archive   = self._mktab(tabs_row,"Archive",    lambda:self._set_tab("archive"))
+        self._tab_priorities= self._mktab(tabs_row,"Focus",      lambda:self._set_tab("priorities"))
+        # These two are mutually exclusive — _refresh_tabs manages which is visible
+        self._tab_archive.pack_forget()
+        self._tab_priorities.pack_forget()
         self._tab_habits  = self._mktab(tabs_row,"🌱",      lambda:self._set_tab("habits"),  compact=True)
         self._tab_docs    = self._mktab(tabs_row,"📄", lambda:self._set_tab("docs"))
         self._tab_stats   = self._mktab(tabs_row,"🎮",      lambda:self._set_tab("stats"),   compact=True)
@@ -571,8 +590,12 @@ class App:
         self.status_lbl.pack(side="left",fill="x",expand=True)
         # pomodoro timer label (hidden until running)
         self._pomo_lbl = tk.Label(bot,text="",bg=self.T["header_bg"],fg=self.T["text"],
-            font=(self.cfg.get("ui_font","Segoe UI Variable"),8,"bold"),padx=4,pady=4)
+            font=(self.cfg.get("ui_font","Segoe UI Variable"),8,"bold"),padx=4,pady=4,
+            cursor="hand2")
         self._pomo_lbl.pack(side="right")
+        self._pomo_lbl.bind("<Button-1>",   self._pomo_toggle)
+        self._pomo_lbl.bind("<Button-3>",   self._pomo_skip)
+        self._pomo_lbl.bind("<Double-Button-1>", lambda e: self._open_pomo_settings())
         # play/pause button
         self._pomo_play_btn = tk.Button(bot,text="▶",command=self._pomo_toggle,
             bg=self.T["header_bg"],fg=self.T["text"],relief="flat",bd=0,
@@ -743,13 +766,26 @@ class App:
 
     def _refresh_tabs(self):
         T = self.T
+        use_pri = self.cfg.get("use_priorities_tab", True)
+        # Swap archive <-> priorities tab (they share the same slot)
+        self._tab_archive.pack_forget()
+        self._tab_priorities.pack_forget()
+        if use_pri:
+            self._tab_priorities.pack(side="left", padx=(6,0), pady=4, after=self._tab_tasks)
+            if self.current_tab == "archive":
+                self.current_tab = "priorities"
+        else:
+            self._tab_archive.pack(side="left", padx=(6,0), pady=4, after=self._tab_tasks)
+            if self.current_tab == "priorities":
+                self.current_tab = "archive"
         tab_map = [
-            (self._tab_tasks,  "active"),
-            (self._tab_archive,"archive"),
-            (self._tab_habits, "habits"),
-            (self._tab_docs,   "docs"),
-            (self._tab_stats,  "stats"),
-            (self._tab_search, "search"),
+            (self._tab_tasks,      "active"),
+            (self._tab_archive,    "archive"),
+            (self._tab_priorities, "priorities"),
+            (self._tab_habits,     "habits"),
+            (self._tab_docs,       "docs"),
+            (self._tab_stats,      "stats"),
+            (self._tab_search,     "search"),
         ]
         for tab, name in tab_map:
             tab.configure(bg=T["btn_bg"] if self.current_tab==name else T["tab_bg"], fg=T["text"])
@@ -899,7 +935,8 @@ class App:
         elif self.current_tab=="search":  self._render_search(T)
         elif self.current_tab=="stats":   self._render_stats(T)
         elif self.current_tab=="docs":    self._render_docs(T)
-        elif self.current_tab=="habits":  self._render_habits(T)
+        elif self.current_tab=="habits":       self._render_habits(T)
+        elif self.current_tab=="priorities":   self._render_priorities(T)
         else:                             self._render_active(T)
 
         tk.Frame(self.task_frame, bg=T["bg"], height=60).pack(fill="x")
@@ -2006,6 +2043,588 @@ class App:
             pass
         if changed:
             save_docs(all_docs)
+
+
+    # ── Priority medals ─────────────────────────────────────────────────────
+    _MEDAL_COLORS = {
+        0: {"bg":"#fffbe6","bar":"#FFD700","badge":"#B8860B","label":"🥇 #1","ring":"#FFD700"},
+        1: {"bg":"#f5f5f5","bar":"#C0C0C0","badge":"#707070","label":"🥈 #2","ring":"#C0C0C0"},
+        2: {"bg":"#fff4eb","bar":"#CD7F32","badge":"#8B4513","label":"🥉 #3","ring":"#CD7F32"},
+    }
+    _MEDAL_DARK = {
+        0: {"bg":"#2a2200","bar":"#FFD700","badge":"#FFD700","label":"🥇 #1","ring":"#FFD700"},
+        1: {"bg":"#1e1e1e","bar":"#C0C0C0","badge":"#C0C0C0","label":"🥈 #2","ring":"#C0C0C0"},
+        2: {"bg":"#221500","bar":"#CD7F32","badge":"#CD7F32","label":"🥉 #3","ring":"#CD7F32"},
+    }
+
+    def _pri_medal(self, rank):
+        dark_themes = {"dark","dusk","slate-teal","mochi","pine","storm","amber-dark",
+                       "crimson","forest","emerald","midnight","space","void","lava","aurora","neon"}
+        pool = self._MEDAL_DARK if self.cfg.get("theme","default") in dark_themes else self._MEDAL_COLORS
+        return pool.get(rank, {"bg":self.T["item_bg"],"bar":self.T["separator"],
+                                "badge":self.T["muted"],"label":f"#{rank+1}","ring":self.T["separator"]})
+
+    def _render_priorities(self, T):
+        items = load_priorities()
+        fn    = self.cfg.get("ui_font","Segoe UI Variable")
+        view  = self.cfg.get("focus_view","list")
+
+        VIEWS = ["📋 List","🟦 Cubes","🔺 Pyramid","🧘 Zen"]
+        VIEW_KEYS = {"📋 List":"list","🟦 Cubes":"cubes","🔺 Pyramid":"pyramid","🧘 Zen":"zen"}
+        VIEW_LABELS = {v:k for k,v in VIEW_KEYS.items()}
+
+        # ── toolbar ─────────────────────────────────────────────────────────
+        tb = tk.Frame(self.task_frame, bg=T["bg"]); tb.pack(fill="x", padx=8, pady=(8,2))
+        tk.Label(tb, text="⭐  Focus Board", bg=T["bg"], fg=T["text"],
+            font=(fn, 11, "bold")).pack(side="left")
+        tk.Button(tb, text="+ Add Priority", command=lambda: self._add_priority_item(items),
+            bg=T["btn_bg"], fg=T["btn_fg"], relief="flat",
+            font=(fn, 9), padx=10, pady=3, cursor="hand2",
+            activebackground=T["btn_hover"]).pack(side="right")
+
+        # View switcher
+        view_var = tk.StringVar(value=VIEW_LABELS.get(view, "📋 List"))
+        import tkinter.ttk as ttk
+        style = ttk.Style()
+        try:
+            style.configure("Pri.TCombobox", fieldbackground=T["entry_bg"],
+                background=T["btn_bg"], foreground=T["text"],
+                arrowcolor=T["text"], selectbackground=T["btn_bg"],
+                selectforeground=T["text"])
+        except Exception: pass
+        vcb = ttk.Combobox(tb, textvariable=view_var, values=VIEWS,
+            state="readonly", width=11, style="Pri.TCombobox",
+            font=(fn, 8))
+        vcb.pack(side="right", padx=(0,8))
+        def _on_view_change(ev=None):
+            key = VIEW_KEYS.get(view_var.get(), "list")
+            self.cfg["focus_view"] = key; save_config(self.cfg)
+            self._render_tasks()
+        vcb.bind("<<ComboboxSelected>>", _on_view_change)
+
+        if not items:
+            tk.Label(self.task_frame,
+                text="Your focus board is empty.\nClick + Add Priority to define what matters most.",
+                bg=T["bg"], fg=T["muted"], font=(fn, 10), justify="center", pady=32).pack(fill="x")
+            return
+
+        if view == "cubes":
+            self._render_pri_cubes(items, T, fn)
+        elif view == "pyramid":
+            self._render_pri_pyramid(items, T, fn)
+        elif view == "zen":
+            self._render_pri_zen(items, T, fn)
+        else:
+            self._render_pri_list(items, T, fn)
+
+    # ── shared helper: one card row ──────────────────────────────────────────
+    def _pri_card_row(self, items, item, rank, T, fn, parent=None, compact=False):
+        med     = self._pri_medal(rank)
+        ibg     = med["bg"] if rank < 3 else T["item_bg"]
+        bar_col = med["bar"] if rank < 3 else T["separator"]
+        host    = parent if parent else self.task_frame
+
+        card = tk.Frame(host, bg=ibg, pady=0)
+        card._pri_idx = rank
+        if parent is None:
+            card.pack(fill="x", pady=(2,0))
+
+        accent = tk.Frame(card, bg=bar_col, width=5)
+        accent.pack(side="left", fill="y")
+        def _upd_accent(e, a=accent): a.configure(height=e.height)
+        card.bind("<Configure>", _upd_accent, add="+")
+
+        inner = tk.Frame(card, bg=ibg, padx=8, pady=3)
+        inner.pack(side="left", fill="both", expand=True)
+
+        top = tk.Frame(inner, bg=ibg); top.pack(fill="x")
+
+        dh = tk.Label(top, text="⋮⋮", bg=ibg, fg=T["muted"], font=(fn,8), cursor="fleur", padx=2)
+        dh.pack(side="left", padx=(0,4))
+        dh.bind("<ButtonPress-1>", lambda e, i=rank: self._pri_drag_start(e, i, items))
+        dh.bind("<Enter>", lambda e, w=dh: w.configure(fg=T["text"]))
+        dh.bind("<Leave>", lambda e, w=dh: w.configure(fg=T["muted"]))
+
+        badge_text = med["label"] if rank < 3 else f"#{rank+1}"
+        badge_fg   = med["badge"] if rank < 3 else T["muted"]
+        tk.Label(top, text=badge_text, bg=ibg, fg=badge_fg,
+            font=(fn, 9, "bold"), width=5).pack(side="left", padx=(0,6))
+
+        title_lbl = tk.Label(top, text=item.get("title","Priority"),
+            bg=ibg, fg=T["text"], font=(fn, 11, "bold"), anchor="w", justify="left")
+        title_lbl.pack(side="left", fill="x", expand=True)
+        title_lbl.bind("<Double-Button-1>",
+            lambda e, lbl=title_lbl, it=item, its=items:
+                self._inline_edit_priority_title(lbl, it, its))
+
+        def _del_pri(it=item, its=items, btn_ref=[None]):
+            b = btn_ref[0]
+            if b is None: return
+            if getattr(b, "_confirm", False):
+                its.remove(it); save_priorities(its); self._render_tasks()
+            else:
+                b._confirm = True; b.configure(text="Sure?", fg=T["close_hover"])
+                b.after(2000, lambda: (setattr(b,"_confirm",False),
+                    b.configure(text="✕", fg=T["muted"])) if b.winfo_exists() else None)
+        del_b = tk.Button(top, text="✕", bg=ibg, fg=T["muted"], relief="flat", bd=0,
+            padx=6, font=(fn,8), cursor="hand2", activebackground=T["item_hover"])
+        del_b._confirm = False
+        del_b.configure(command=lambda br=[del_b], it=item, its=items: _del_pri(it, its, br))
+        del_b.pack(side="right")
+
+        if not compact:
+            sub_frame = tk.Frame(inner, bg=ibg); sub_frame.pack(fill="x", pady=(2,0))
+            self._render_priority_subtasks(sub_frame, item, items, ibg, T)
+
+            bot_row = tk.Frame(inner, bg=ibg); bot_row.pack(fill="x")
+            add_sub_btn = tk.Label(bot_row, text="+ sub-item", bg=ibg, fg=T["muted"],
+                font=(fn,7), cursor="hand2", pady=0)
+            add_sub_btn.pack(side="left")
+            add_sub_btn.bind("<Button-1>",
+                lambda e, it=item, its=items, sf=sub_frame, ibg=ibg:
+                    self._add_priority_subtask(it, its, sf, ibg))
+            add_sub_btn.bind("<Enter>", lambda e, w=add_sub_btn: w.configure(fg=T["text"]))
+            add_sub_btn.bind("<Leave>", lambda e, w=add_sub_btn: w.configure(fg=T["muted"]))
+
+            note_text = item.get("notes","")
+            note_preview = note_text[:120] + ("…" if len(note_text)>120 else "")
+            note_lbl = tk.Label(inner, text=note_preview if note_text else "✏ note",
+                bg=ibg, fg=T["muted"], font=(fn,7), anchor="w", justify="left",
+                wraplength=1, pady=2, padx=0, cursor="hand2")
+            note_lbl.pack(fill="x", anchor="w", pady=(2,0))
+            def _upd_wrap(e, l=note_lbl): l.configure(wraplength=max(60,e.width-8))
+            inner.bind("<Configure>", _upd_wrap, add="+")
+            note_lbl.bind("<Button-1>",
+                lambda e, it=item, its=items, lbl=note_lbl, ibg=ibg:
+                    self._edit_priority_notes(it, its, lbl, ibg))
+            inner.bind("<Button-1>",
+                lambda e, it=item, its=items, lbl=note_lbl, ibg=ibg:
+                    self._edit_priority_notes(it, its, lbl, ibg))
+            card.bind("<Button-1>",
+                lambda e, it=item, its=items, lbl=note_lbl, ibg=ibg:
+                    self._edit_priority_notes(it, its, lbl, ibg))
+
+        return card
+
+    # ── LIST view ────────────────────────────────────────────────────────────
+    def _render_pri_list(self, items, T, fn):
+        for rank, item in enumerate(items):
+            card = self._pri_card_row(items, item, rank, T, fn)
+            tk.Frame(self.task_frame, bg=T["separator"], height=1).pack(fill="x")
+        tk.Frame(self.task_frame, bg=T["bg"], height=40).pack(fill="x")
+
+    # ── CUBES view ───────────────────────────────────────────────────────────
+    def _render_pri_cubes(self, items, T, fn):
+        grid_host = tk.Frame(self.task_frame, bg=T["bg"])
+        grid_host.pack(fill="both", expand=True, padx=6, pady=6)
+        COLS = 2
+        for i, item in enumerate(items):
+            r, c = divmod(i, COLS)
+            med    = self._pri_medal(i)
+            ibg    = med["bg"] if i < 3 else T["item_bg"]
+            bar_col= med["bar"] if i < 3 else T["separator"]
+            badge_text = med["label"] if i < 3 else f"#{i+1}"
+            badge_fg   = med["badge"] if i < 3 else T["muted"]
+
+            cube = tk.Frame(grid_host, bg=ibg, relief="flat",
+                highlightthickness=2, highlightbackground=bar_col)
+            cube._pri_idx = i
+            cube.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            grid_host.grid_columnconfigure(c, weight=1)
+            grid_host.grid_rowconfigure(r, weight=0)
+
+            # colored header strip
+            hdr = tk.Frame(cube, bg=bar_col, height=6)
+            hdr.pack(fill="x")
+
+            body = tk.Frame(cube, bg=ibg, padx=8, pady=6)
+            body.pack(fill="both", expand=True)
+
+            # badge + title row
+            top = tk.Frame(body, bg=ibg); top.pack(fill="x")
+            tk.Label(top, text=badge_text, bg=ibg, fg=badge_fg,
+                font=(fn,8,"bold")).pack(side="left", padx=(0,4))
+            title_lbl = tk.Label(top, text=item.get("title","Priority"),
+                bg=ibg, fg=T["text"], font=(fn,10,"bold"),
+                anchor="w", wraplength=120)
+            title_lbl.pack(side="left", fill="x", expand=True)
+            title_lbl.bind("<Double-Button-1>",
+                lambda e, lbl=title_lbl, it=item, its=items:
+                    self._inline_edit_priority_title(lbl, it, its))
+            def _upd_cube_wrap(e, l=title_lbl):
+                l.configure(wraplength=max(40, e.width-60))
+            top.bind("<Configure>", _upd_cube_wrap, add="+")
+
+            # subtask progress bar
+            subs = item.get("subtasks",[])
+            done = sum(1 for s in subs if s.get("done"))
+            if subs:
+                prog_bg = tk.Frame(body, bg=T["separator"], height=3)
+                prog_bg.pack(fill="x", pady=(4,0))
+                pct = done/len(subs)
+                def _draw_prog(e, pb=prog_bg, p=pct, col=bar_col):
+                    w=pb.winfo_width()
+                    if w<4: return
+                    for ch in pb.winfo_children(): ch.destroy()
+                    if p>0: tk.Frame(pb,bg=col,height=3,width=max(1,int(w*p))).place(x=0,y=0)
+                prog_bg.bind("<Configure>",_draw_prog,add="+")
+                tk.Label(body, text=f"{done}/{len(subs)} done",
+                    bg=ibg, fg=T["muted"], font=(fn,7)).pack(anchor="w")
+
+            # note snippet
+            note = item.get("notes","")
+            if note:
+                tk.Label(body, text=note[:60]+("…" if len(note)>60 else ""),
+                    bg=ibg, fg=T["muted"], font=(fn,7),
+                    anchor="w", wraplength=120, justify="left").pack(anchor="w", pady=(2,0))
+
+            # delete (top-right corner)
+            def _del(it=item, its=items, cr=[None]):
+                b=cr[0]
+                if b is None: return
+                if getattr(b,"_confirm",False):
+                    its.remove(it); save_priorities(its); self._render_tasks()
+                else:
+                    b._confirm=True; b.configure(text="✕?",fg=T["close_hover"])
+                    b.after(1500,lambda:(setattr(b,"_confirm",False),b.configure(text="✕",fg=T["muted"])) if b.winfo_exists() else None)
+            del_b=tk.Button(top,text="✕",bg=ibg,fg=T["muted"],relief="flat",bd=0,
+                padx=4,font=(fn,7),cursor="hand2",activebackground=T["item_hover"])
+            del_b._confirm=False
+            del_b.configure(command=lambda br=[del_b],it=item,its=items:_del(it,its,br))
+            del_b.pack(side="right")
+
+            # click anywhere → open note
+            for w in (cube, body, top):
+                w.bind("<Button-1>",
+                    lambda e,it=item,its=items: self._edit_priority_notes(
+                        it, its,
+                        next((c for c in e.widget.winfo_children()
+                              if isinstance(c,tk.Label) and "✏" in c.cget("text")),
+                             e.widget), ibg))
+
+        tk.Frame(self.task_frame, bg=T["bg"], height=20).pack(fill="x")
+
+    # ── PYRAMID view ─────────────────────────────────────────────────────────
+    def _render_pri_pyramid(self, items, T, fn):
+        # #1 full width, #2+#3 side by side, rest as compact list
+        def _mini_cube(parent, item, rank, col_weight=1):
+            med    = self._pri_medal(rank)
+            ibg    = med["bg"] if rank < 3 else T["item_bg"]
+            bar_col= med["bar"] if rank < 3 else T["separator"]
+            badge_text = med["label"] if rank < 3 else f"#{rank+1}"
+            badge_fg   = med["badge"] if rank < 3 else T["muted"]
+            cube = tk.Frame(parent, bg=ibg,
+                highlightthickness=2, highlightbackground=bar_col)
+            tk.Frame(cube, bg=bar_col, height=5).pack(fill="x")
+            body = tk.Frame(cube, bg=ibg, padx=8, pady=5)
+            body.pack(fill="both", expand=True)
+            tk.Label(body, text=badge_text, bg=ibg, fg=badge_fg,
+                font=(fn,8,"bold")).pack(anchor="w")
+            tk.Label(body, text=item.get("title","Priority"), bg=ibg, fg=T["text"],
+                font=(fn,10,"bold"), anchor="w", wraplength=200).pack(anchor="w")
+            subs = item.get("subtasks",[])
+            done = sum(1 for s in subs if s.get("done"))
+            if subs:
+                tk.Label(body, text=f"{done}/{len(subs)} done",
+                    bg=ibg, fg=T["muted"], font=(fn,7)).pack(anchor="w")
+            note = item.get("notes","")
+            if note:
+                tk.Label(body, text=note[:80]+("…" if len(note)>80 else ""),
+                    bg=ibg, fg=T["muted"], font=(fn,7), wraplength=200,
+                    justify="left").pack(anchor="w", pady=(2,0))
+            # click → open note
+            note_lbl_ref = [None]
+            def _open(e,it=item,its=items):
+                lbl = next((w for w in body.winfo_children()
+                            if isinstance(w,tk.Label) and "✏" in w.cget("text")), body)
+                self._edit_priority_notes(it, its, lbl, ibg)
+            for w in (cube,body): w.bind("<Button-1>",_open)
+            return cube
+
+        if items:
+            top_cube = _mini_cube(self.task_frame, items[0], 0)
+            top_cube.pack(fill="x", padx=6, pady=(4,2))
+
+        if len(items) >= 2:
+            row2 = tk.Frame(self.task_frame, bg=T["bg"])
+            row2.pack(fill="x", padx=6, pady=(0,2))
+            for idx in range(1, min(3, len(items))):
+                c = _mini_cube(row2, items[idx], idx)
+                c.pack(side="left", fill="x", expand=True,
+                       padx=(0,4) if idx==1 else (4,0))
+
+        if len(items) > 3:
+            tk.Label(self.task_frame, text="  ─── More ───",
+                bg=T["bg"], fg=T["muted"], font=(fn,7)).pack(anchor="w", padx=12, pady=(4,0))
+            for rank in range(3, len(items)):
+                card = self._pri_card_row(items, items[rank], rank, T, fn, compact=True)
+                card.pack(fill="x", pady=(1,0))
+                tk.Frame(self.task_frame, bg=T["separator"], height=1).pack(fill="x")
+
+        tk.Frame(self.task_frame, bg=T["bg"], height=20).pack(fill="x")
+
+    # ── ZEN view (one priority at a time) ────────────────────────────────────
+    def _render_pri_zen(self, items, T, fn):
+        idx = self.cfg.get("focus_zen_idx", 0)
+        if idx >= len(items): idx = 0
+        item = items[idx]
+        rank = idx
+        med  = self._pri_medal(rank)
+        ibg  = med["bg"] if rank < 3 else T["item_bg"]
+        bar_col = med["bar"] if rank < 3 else T["separator"]
+
+        # nav bar
+        nav = tk.Frame(self.task_frame, bg=T["bg"])
+        nav.pack(fill="x", padx=8, pady=(4,0))
+        prev_b = tk.Button(nav, text="◀", bg=T["btn_bg"], fg=T["text"],
+            relief="flat", font=(fn,9), padx=8, cursor="hand2",
+            state="normal" if idx>0 else "disabled",
+            activebackground=T["btn_hover"],
+            command=lambda: self._zen_go(idx-1))
+        prev_b.pack(side="left")
+        tk.Label(nav, text=f"{idx+1} / {len(items)}", bg=T["bg"],
+            fg=T["muted"], font=(fn,8)).pack(side="left", padx=8)
+        next_b = tk.Button(nav, text="▶", bg=T["btn_bg"], fg=T["text"],
+            relief="flat", font=(fn,9), padx=8, cursor="hand2",
+            state="normal" if idx<len(items)-1 else "disabled",
+            activebackground=T["btn_hover"],
+            command=lambda: self._zen_go(idx+1))
+        next_b.pack(side="left")
+
+        # big focused card
+        card = tk.Frame(self.task_frame, bg=ibg,
+            highlightthickness=3, highlightbackground=bar_col)
+        card.pack(fill="x", padx=10, pady=8)
+
+        # top color strip
+        tk.Frame(card, bg=bar_col, height=8).pack(fill="x")
+
+        body = tk.Frame(card, bg=ibg, padx=16, pady=12)
+        body.pack(fill="both", expand=True)
+
+        badge_text = med["label"] if rank < 3 else f"#{rank+1}"
+        badge_fg   = med["badge"] if rank < 3 else T["muted"]
+        tk.Label(body, text=badge_text, bg=ibg, fg=badge_fg,
+            font=(fn,14,"bold")).pack(anchor="w", pady=(0,4))
+        title_lbl = tk.Label(body, text=item.get("title","Priority"),
+            bg=ibg, fg=T["text"], font=(fn,16,"bold"),
+            anchor="w", wraplength=1, justify="left")
+        title_lbl.pack(fill="x", anchor="w", pady=(0,8))
+        def _upd_zen_wrap(e, l=title_lbl): l.configure(wraplength=max(80,e.width-32))
+        body.bind("<Configure>", _upd_zen_wrap, add="+")
+        title_lbl.bind("<Double-Button-1>",
+            lambda e, lbl=title_lbl, it=item, its=items:
+                self._inline_edit_priority_title(lbl, it, its))
+
+        # subtasks full list
+        sub_frame = tk.Frame(body, bg=ibg)
+        sub_frame.pack(fill="x", pady=(0,6))
+        self._render_priority_subtasks(sub_frame, item, items, ibg, T)
+        bot_row = tk.Frame(body, bg=ibg); bot_row.pack(fill="x")
+        add_sub = tk.Label(bot_row, text="+ sub-item", bg=ibg, fg=T["muted"],
+            font=(fn,8), cursor="hand2")
+        add_sub.pack(side="left")
+        add_sub.bind("<Button-1>",
+            lambda e, it=item, its=items, sf=sub_frame, ibg=ibg:
+                self._add_priority_subtask(it, its, sf, ibg))
+
+        # note area (full, multi-line)
+        tk.Frame(body, bg=T["separator"], height=1).pack(fill="x", pady=(6,4))
+        note_text = item.get("notes","")
+        note_lbl = tk.Label(body, text=note_text or "✏ Tap to add a note…",
+            bg=ibg, fg=T["text"] if note_text else T["muted"],
+            font=(fn,9), anchor="nw", justify="left", wraplength=1, pady=4,
+            cursor="hand2")
+        note_lbl.pack(fill="x", anchor="w")
+        def _upd_n_wrap(e, l=note_lbl): l.configure(wraplength=max(80,e.width-32))
+        body.bind("<Configure>", _upd_n_wrap, add="+")
+        note_lbl.bind("<Button-1>",
+            lambda e, it=item, its=items, lbl=note_lbl, ibg=ibg:
+                self._edit_priority_notes(it, its, lbl, ibg))
+
+        # dot indicators at bottom
+        dot_row = tk.Frame(self.task_frame, bg=T["bg"])
+        dot_row.pack(pady=(2,8))
+        for di in range(len(items)):
+            dot = tk.Label(dot_row,
+                text="●" if di==idx else "○",
+                bg=T["bg"],
+                fg=bar_col if di==idx else T["muted"],
+                font=(fn,8), cursor="hand2")
+            dot.pack(side="left", padx=1)
+            dot.bind("<Button-1>", lambda e, i=di: self._zen_go(i))
+
+    def _zen_go(self, idx):
+        self.cfg["focus_zen_idx"] = max(0, idx)
+        save_config(self.cfg)
+        self._render_tasks()
+
+    def _render_priority_subtasks(self, sf, item, items, ibg, T):
+        for w in sf.winfo_children(): w.destroy()
+        fn = self.cfg.get("ui_font","Segoe UI Variable")
+        for sub in item.get("subtasks", []):
+            row = tk.Frame(sf, bg=ibg); row.pack(fill="x", anchor="w")
+            var = tk.BooleanVar(value=sub.get("done", False))
+            chk = tk.Checkbutton(row, variable=var, bg=ibg, activebackground=ibg,
+                selectcolor=T["check_done"] if sub.get("done") else ibg,
+                relief="flat", bd=0, highlightthickness=0,
+                command=lambda v=var, s=sub, it=item, its=items, sf2=sf, ibg2=ibg:
+                    self._toggle_priority_sub(s, v, it, its, sf2, ibg2))
+            chk.pack(side="left")
+            style = "overstrike" if sub.get("done") else "normal"
+            color = T["muted"] if sub.get("done") else T["text"]
+            lbl = tk.Label(row, text=sub.get("text",""), bg=ibg, fg=color,
+                font=(fn, 8, style), anchor="w")
+            lbl.pack(side="left", fill="x", expand=True)
+            lbl.bind("<Double-Button-1>",
+                lambda e, row=row, l=lbl, s=sub, it=item, its=items:
+                    self._inline_edit_priority_sub(row, l, s, it, its))
+            # tiny delete sub
+            def _del_sub(s=sub, it=item, its=items, sf3=sf, ibg3=ibg):
+                it.get("subtasks",[]).remove(s); save_priorities(its)
+                self._render_priority_subtasks(sf3, it, its, ibg3, T)
+            _x_lbl = tk.Label(row, text="✕", bg=ibg, fg=T["muted"], font=(fn,7),
+                cursor="hand2")
+            _x_lbl.pack(side="right", padx=2)
+            _x_lbl.bind("<Button-1>", lambda e, fn=_del_sub: fn())
+
+    def _toggle_priority_sub(self, sub, var, item, items, sf, ibg):
+        sub["done"] = var.get()
+        save_priorities(items)
+        self._render_priority_subtasks(sf, item, items, ibg, self.T)
+
+    def _add_priority_subtask(self, item, items, sf, ibg):
+        new_sub = {"id": str(uuid.uuid4()), "text": "", "done": False}
+        item.setdefault("subtasks", []).append(new_sub)
+        save_priorities(items)
+        self._render_priority_subtasks(sf, item, items, ibg, self.T)
+        # inline edit the new sub
+        if sf.winfo_children():
+            last_row = sf.winfo_children()[-1]
+            lbls = [w for w in last_row.winfo_children() if isinstance(w, tk.Label) and w.cget("text") == ""]
+            if lbls:
+                self._inline_edit_priority_sub(last_row, lbls[0], new_sub, item, items)
+
+    def _inline_edit_priority_title(self, lbl, item, items):
+        T = self.T; fn = self.cfg.get("ui_font","Segoe UI Variable")
+        old = item.get("title","")
+        lbl.pack_forget()
+        var = tk.StringVar(value=old)
+        e = tk.Entry(lbl.master, textvariable=var, bg=T["entry_bg"], fg=T["entry_fg"],
+            insertbackground=T["entry_fg"], relief="flat", font=(fn,11,"bold"),
+            highlightthickness=1, highlightbackground=T["check_done"])
+        e.pack(side="left", fill="x", expand=True, ipady=2)
+        e.focus_set(); e.select_range(0,"end")
+        def finish(ev=None):
+            new = var.get().strip() or old
+            item["title"] = new; save_priorities(items)
+            try: e.destroy()
+            except Exception: pass
+            lbl.configure(text=new); lbl.pack(side="left", fill="x", expand=True)
+        e.bind("<Return>", finish); e.bind("<Escape>", lambda ev: finish())
+        e.bind("<FocusOut>", finish)
+
+    def _inline_edit_priority_sub(self, row, lbl, sub, item, items):
+        T = self.T; fn = self.cfg.get("ui_font","Segoe UI Variable")
+        old = sub.get("text","")
+        lbl.pack_forget()
+        var = tk.StringVar(value=old)
+        e = tk.Entry(row, textvariable=var, bg=T["entry_bg"], fg=T["entry_fg"],
+            insertbackground=T["entry_fg"], relief="flat", font=(fn,8),
+            highlightthickness=1, highlightbackground=T["check_done"])
+        e.pack(side="left", fill="x", expand=True, ipady=2)
+        e.focus_set(); e.select_range(0,"end")
+        _done = [False]
+        def finish(ev=None, discard=False):
+            if _done[0]: return
+            _done[0] = True
+            new = var.get().strip()
+            if discard or (not new and not old):
+                # brand-new empty sub that was never typed → remove silently
+                if not old and not new:
+                    item.get("subtasks",[]).remove(sub); save_priorities(items)
+                    try: row.destroy()
+                    except Exception: pass
+                else:
+                    # restore old label if user cleared existing text via Escape
+                    try: e.destroy()
+                    except Exception: pass
+                    lbl.configure(text=old or ""); lbl.pack(side="left", fill="x", expand=True)
+                return
+            # always save whatever was typed (even if same as old)
+            sub["text"] = new; save_priorities(items)
+            try: e.destroy()
+            except Exception: pass
+            lbl.configure(text=new); lbl.pack(side="left", fill="x", expand=True)
+        e.bind("<Return>",   lambda ev: finish())
+        e.bind("<Escape>",   lambda ev: finish(discard=True))
+        e.bind("<FocusOut>", lambda ev: self.root.after(60, finish))
+
+    def _edit_priority_notes(self, item, items, preview_lbl, ibg):
+        T = self.T; fn = self.cfg.get("ui_font","Segoe UI Variable")
+        old = item.get("notes","")
+        preview_lbl.pack_forget()
+        txt = tk.Text(preview_lbl.master, bg=T["entry_bg"], fg=T["entry_fg"],
+            insertbackground=T["entry_fg"], relief="flat", font=(fn,8),
+            highlightthickness=1, highlightbackground=T["check_done"],
+            wrap="word", height=4, padx=4, pady=4)
+        txt.insert("1.0", old)
+        txt.pack(fill="x", pady=(2,2))
+        txt.focus_set()
+        def finish(ev=None):
+            new = txt.get("1.0","end-1c").strip()
+            item["notes"] = new; save_priorities(items)
+            preview = new[:120] + ("…" if len(new)>120 else "")
+            preview_lbl.configure(text=preview or "Add a note…",
+                fg=T["muted"] if not new else T["text"])
+            try: txt.destroy()
+            except Exception: pass
+            preview_lbl.pack(fill="x", anchor="w", pady=(2,0))
+        txt.bind("<Escape>", lambda e: finish())
+        txt.bind("<FocusOut>", finish)
+        # Ctrl+Enter to confirm
+        txt.bind("<Control-Return>", lambda e: finish())
+
+    def _add_priority_item(self, items):
+        new = {"id": str(uuid.uuid4()), "title": "New Priority",
+               "notes": "", "subtasks": []}
+        items.append(new); save_priorities(items)
+        self._render_tasks()
+
+    # ── priority drag-reorder ────────────────────────────────────────────────
+    def _pri_drag_start(self, e, idx, items):
+        self._drag_pri_idx   = idx
+        self._drag_pri_start = e.y_root
+        self._drag_pri_moved = False
+        self._drag_pri_items = items
+        self.root.bind("<B1-Motion>",       self._pri_drag_motion,    add="+")
+        self.root.bind("<ButtonRelease-1>", self._pri_drag_end_root,  add="+")
+
+    def _pri_drag_motion(self, e):
+        if not hasattr(self,"_drag_pri_idx") or self._drag_pri_idx is None: return
+        if abs(e.y_root - self._drag_pri_start) > 6:
+            self._drag_pri_moved = True
+
+    def _pri_drag_end_root(self, e):
+        self.root.unbind("<B1-Motion>")
+        self.root.unbind("<ButtonRelease-1>")
+        if not hasattr(self,"_drag_pri_idx") or self._drag_pri_idx is None: return
+        if not getattr(self,"_drag_pri_moved", False):
+            self._drag_pri_idx = None; return
+        src   = self._drag_pri_idx
+        items = self._drag_pri_items
+        self._drag_pri_idx = None; self._drag_pri_moved = False
+        target = None
+        for child in self.task_frame.winfo_children():
+            if not hasattr(child,"_pri_idx"): continue
+            cy = child.winfo_rooty()
+            if cy <= e.y_root <= cy + child.winfo_height():
+                target = child._pri_idx; break
+        if target is None or target == src: return
+        if src < len(items) and target < len(items):
+            items.insert(target, items.pop(src))
+            save_priorities(items)
+            self._render_tasks()
 
     def _render_docs(self, T):
         all_docs = [d for d in load_docs() if not d.get("deleted")]
@@ -3404,10 +4023,10 @@ class App:
             self._settings_widgets["frame_bg"].append(f); self._settings_widgets["section"].append(l)
 
         def rowf(label,maker):
-            f = tk.Frame(sf,bg=self.T["bg"]); f.pack(fill="x",padx=12,pady=4)
+            f = tk.Frame(sf,bg=self.T["bg"]); f.pack(fill="x",padx=(12,0),pady=4)
             l = tk.Label(f,text=label,bg=self.T["bg"],fg=self.T["text"],
-                font=(self.cfg.get("ui_font","Segoe UI Variable"),9),width=26,anchor="w")
-            l.pack(side="left")
+                font=(self.cfg.get("ui_font","Segoe UI Variable"),9),anchor="w")
+            l.pack(side="left", fill="x", expand=True)
             self._settings_widgets["frame_bg"].append(f); self._settings_widgets["label"].append(l)
             maker(f); return f
 
@@ -3494,6 +4113,8 @@ class App:
         live_toggle("Show Windows title bar:","show_system_titlebar",lambda v:self._apply_window_mode())
         live_toggle("Display in taskbar:","show_in_taskbar",lambda v:self._apply_window_mode())
         live_toggle("Run at Windows startup:","run_at_startup",lambda v:self._apply_startup(v))
+        live_toggle("Use ⭐ Focus tab (replaces Archive tab):","use_priorities_tab",
+            lambda v:(self._refresh_tabs(), self._render_tasks()))
 
         section("UI Scale")
         scale_var = tk.DoubleVar(value=float(self.cfg.get("ui_scale",1.0)))
@@ -3595,7 +4216,7 @@ class App:
         c=tk.Checkbutton(parent,variable=var,bg=self.T["bg"],fg=self.T["text"],
             activebackground=self.T["bg"],selectcolor=self.T["entry_bg"],
             font=(self.cfg.get("ui_font","Segoe UI Variable"),9),command=command)
-        c.pack(side="left"); self._settings_widgets["check"].append(c); return c
+        c.pack(side="right", padx=(0,245)); self._settings_widgets["check"].append(c); return c
 
     def _startup_shortcut_path(self):
         appdata = os.environ.get("APPDATA","")
@@ -3877,7 +4498,10 @@ class App:
     def _pomo_schedule_tick(self):
         """Play a random tick sound (1–16) every second if enabled and running."""
         if not self._pomo_running: return
-        if self.cfg.get("pomo_tick_enabled", True):
+        is_break = (self._pomo_phase == "break")
+        no_tick_break = bool(self.cfg.get("pomo_no_tick_break", True))
+        tick_enabled  = bool(self.cfg.get("pomo_tick_enabled", True))
+        if tick_enabled and not (is_break and no_tick_break):
             import random as _rnd
             n = _rnd.randint(1, 16)
             self._pomo_sound(f"clockticksound{n}.wav",
@@ -4052,10 +4676,21 @@ class App:
             selectcolor=T["entry_bg"], font=font_n).grid(
             row=4, column=0, columnspan=2, sticky="w", pady=2)
 
-        lbl(sf, "Volume: use system mixer").grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
+        no_tick_break_var = tk.BooleanVar(value=self.cfg.get("pomo_no_tick_break", True))
+        def _on_no_tick_break():
+            val = no_tick_break_var.get()
+            self.cfg["pomo_no_tick_break"] = val
+            save_config(self.cfg)
+        tk.Checkbutton(sf, text="No ticking during break", variable=no_tick_break_var,
+            command=_on_no_tick_break,
+            bg=T["bg"], fg=T["text"], activebackground=T["bg"],
+            selectcolor=T["entry_bg"], font=font_n).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=2)
+
+        lbl(sf, "Volume: use system mixer").grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
 
         # ── Alert sounds (work/break start) ──
-        lbl(sf, "── Alert sounds ──").grid(row=6, column=0, columnspan=2, sticky="w", pady=(8,0))
+        lbl(sf, "── Alert sounds ──").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8,0))
         alert_var = tk.BooleanVar(value=self.cfg.get("pomo_alert_enabled",True))
         def _on_alert_toggle():
             self.cfg["pomo_alert_enabled"] = alert_var.get(); _autosave()
